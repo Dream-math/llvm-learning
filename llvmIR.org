@@ -1,0 +1,87 @@
+#+TITLE:LLVM IR总结
+* Static single assignment form
+SSA是IR的一种性质，要求每个变量只赋值一次。每个变量必须先声明或者定义再使用。通常对原有变量添加后缀生成新的变量，例如：
+#+BEGIN_SRC C
+y = 1;
+y = 2;
+x = y;
+#+END_SRC
+转换成SSA的形式为：
+#+BEGIN_SRC
+y_1 = 1;
+y_2 = 2;
+x_1 = y_2;
+#+END_SRC
+在分支选择时，会使用Phi函数，目前尚不清楚llvm IR何时使用phi指令，当前下面图片的示例生成的IR表示没有出现phi指令，初步生成
+的IR表示，将变量以alloca指令分配到stack上，然后借助临时变量完成计算。
+[[./SSA_example1.1.png][原始]][[./SSA_example1.2.png][SSA形式]][[./SSA_example1.3.png][phi函数形式]]
+
+* automatic variable
+自动变量（Automatic Variable）指的是局部作用域变量，具体来说即是在控制流进入变量作用域时系统自动为其分配存储空间，并在离开作用域时释放空间的一类变量。
+
+* Identifiers
+根据类型分为2类：
+1、全局identifiers（functions，global variables），前缀为@。
+2、局部identifiers（register names，types），前缀为%。
+根据用途有3种格式：
+1、Named values（非编译器生成的临时变量）由前缀加上字符串组成。它们的正则表达式形式为：'[%@][-a-zA-Z$._][-a-zA-Z$._0-9]*'
+2、Unnamed values 形示为unsigned numeric value加上前缀。例如%12，@2。
+3、Constants。
+LLVM 要求前缀的原因：
+1、避免和reserved words冲突。
+2、unamed identifiers让编译器能快速确定一个temporary variable，而不会和symbol table 冲突。
+#+BEGIN_SRC
+%0 = add i32 %X, %X           ; yields i32:%0
+%1 = add i32 %0, %0           ; yields i32:%1
+%result = add i32 %1, %1
+#+END_src
+上面3行IR代码表明如下3点LLVM IR的语法特性：
+1、以分号；为注释的起始符。
+2、unnamed temporaries 主要用于中间计算，即计算结果没有被赋值给named value。
+3、unnamed temporaries 是的数字部分是从0开始的顺序命名的。basic block的label和 unnamed 函数参数也包含在这个顺序中，
+
+* high level structure
+** module structure
+LLVM的程序结构如下（缩进表示包含关系）：
+programs:
+        modules:输入程序编译的基本单元，llvm linker merges function (global variables) definitions，解析forward声明关系，merge symbol tables将modules连接在一起。
+                global variables
+                functions
+                symbol table entries
+** linkage types
+所有的全局变量和函数有如下的类型的linkage:
+1、private
+linkage为private表示该global values只能被当前module的成员直接访问。将包含private global value的code link到一个module时，为了避免冲突可能会对该private global value重命名。
+
+2、internal
+（和private类似，只能被当前module中的成员访问?）global value作为object file中的local symbol，它和C语言中的static关键字对应。（object file 中的local symbol什么意思）
+
+3、available_externally
+globals are never emitted into the object file corresponding to the LLVM module.从linker的角度，available_externally global 等价于 external declaration。有利于inlining和
+其他的一些优化。这种linkage type只能出现在definitions，不能出现在declarations。
+
+4、linkonce
+在链接时，将此类的global和其他同名的global merge。unreferenced linkonce globals 能被删除。能被用于实现某种形式的inlining functions, templates或其他代码，开启inlining和其它optimizations使用linkonce_odr linkage。
+
+5、weak
+和linkonce类似，但是unreferenced weak globals不能被删除。这种类型被用于C源码中声明为weak的globals。
+
+6、common
+和weak类似，但是用于C语言中的tentative definitions。common symbols 可能没有explicit section，必须有一个0 initializer，无法被标记为constant，不适用于functions和aliases。
+
+7、appending
+只能用于指向array的全局变量指针。当两个appending的全局指针链接时，这两个array合并到一起。
+
+8、extern_weak
+这种linkage在语义上遵循ELF目标文件模式，symbol是weak类型的知道链接后，如果没有被链接，symbol则变成null而不是undefined reference。
+
+9、linkonce_odr, weak_odr
+
+
+
+* store 指令
+store指令用于写memory。
+* load指令
+load指令用于读memory.
+* sub指令
+sub返回两个操作数的差值
