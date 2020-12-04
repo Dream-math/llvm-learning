@@ -140,13 +140,13 @@ llvm 的function, call和invoke指令前有一个可选的标注calling conventi
 将这类函数进行内联。
 
 4、cc 10：GHC convention
-专为Glasgow Haskell Compiler使用，在寄存器内传递一切数据。
+专为Glasgow Haskell Compiler使用，通过寄存器传递一切数据。
 
 5、cc 11：HiPE calling convention
 专为 High-Performance Erlang(HiPE)使用，相对于通常的C calling convention，它使用更多的寄存器进行参数传递。
 
 6、webkit_jscc：WebKit’s JavaScript calling convention
-这种calling convention为WebKit FTL JIT实现，它在stack上从右到左进行参数传递。
+这种calling convention为WebKit FTL JIT实现，它在stack上从右到左进行参数传递（和cdecl calling convention一样的传递方式），使用平台定制的寄存器保存返回值。
 
 7、anyregcc：Dynamic calling convention for code patching
 支持 patching an arbitrary code sequence 以替换call site，只能用于llvm.experimental.patchpoint 相关的calls。
@@ -155,34 +155,27 @@ llvm 的function, call和invoke指令前有一个可选的标注calling conventi
 尽可能的使得caller中的代码unintrusive，这种calling convention在参数和返回值如何传递上和C calling convention一致，但是使用了不同的 caller/callee-saved registers。
 
 9、preserve_allcc：The PreserveAll calling convention
-This calling convention attempts to make the code in the caller even less intrusive than the PreserveMost calling convention。
+这种调用约定目的是让caller中的code更加的unintrusive。在参数和返回值的传递上，它的方式和C calling convention一样，但是使用了不同的caller/callee 保存的寄存器集。这
+中约定的想法是在不需要调出其它函数的情形下，调用runtime function。
 
 10、cxx_fast_tlscc：The CXX_FAST_TLS calling convention for access functions
-Clang generates an access function to access C++-style TLS. The access function generally has an entry block, an exit block and an initialization block that is
-run at the first time. The entry and exit blocks can access a few TLS IR variables, each access will be lowered to a platform-specific sequence.
-This calling convention aims to minimize overhead in the caller by preserving as many registers as possible (all the registers that are preserved on the fast
-path, composed of the entry and exit blocks).
-This calling convention behaves identical to the C calling convention on how arguments and return values are passed, but it uses a different set of caller/callee-saved
-registers.
-Given that each platform has its own lowering sequence, hence its own set of preserved registers, we can’t use the existing PreserveMost.
-On X86-64 the callee preserves all general purpose registers, except for RDI and RAX.
+clang生成一个访问C++风格的TLS(thread local storage)的接口函数，这个接口函数通常有一个entry block，一个exit block和一个会在第一时间运行的initialization block。
+entry 和 exit block 能访问一些TLS IR 变量，每一个访问接口都会转换成平台相关的指令序列。这种calling convention目的在于通过尽可能多的保存register值来最小化caller的开销。
+这种calling convention在参数和返回值如何传递上和C calling convention一致，但是使用了不同的 caller/callee-saved registers。
 
-11、“swiftcc” - This calling convention is used for Swift language.
-On X86-64 RCX and R8 are available for additional integer returns, and XMM2 and XMM3 are available for additional FP/vector returns.
-On iOS platforms, we use AAPCS-VFP calling convention.
+11、“swiftcc” - 这种 calling convention 用于 Swift language.
+在 x86-64 平台上 RCX 和 R8 寄存器可以用于额外的整数返回值， XMM2 和 XMM3 可以用于额外的 FP/vector 返回值，在 iOS平台，我们使用 AAPCS-VFP calling convention。
 
 12、“tailcc” - Tail callable calling convention
-This calling convention ensures that calls in tail position will always be tail call optimized. This calling convention is equivalent to fastcc, except for an additional
-guarantee that tail calls will be produced whenever possible. Tail calls can only be optimized when this, the fastcc, the GHC or the HiPE convention is used. This calling
-convention does not support varargs and requires the prototype of all callees to exactly match the prototype of the function definition.
+这种calling convention 确保在尾部位置的calls总是会执行tail call optimized。这种calling convention 等价于fastcc，除了会保证如果可能tail call的指令一定会生成。tail call
+只有在 tailcc，fastcc，GHC或者HiPE convention被使用的时候才会被优化。这种calling convention 不支持变长度参数函数并且要求所有callee的声明和定义保持一致。
 
 13、“cfguard_checkcc” - Windows Control Flow Guard (Check mechanism)
-This calling convention is used for the Control Flow Guard check function, calls to which can be inserted before indirect calls to check that the call target is a valid
-function address. The check function has no return value, but it will trigger an OS-level error if the address is not a valid target. The set of registers preserved by
-the check function, and the register containing the target address are architecture-specific.
+这种calling convention 用于 Control Flow Guard 检测函数，可以在间接调用之前检测函数，以检查调用函数的地址是否有效。检测函数没有返回值，但是会引起OS-level的error，如果
+地址是无效的，
 
 14、“cc <n>” - Numbered convention
-Any calling convention may be specified by number, allowing target-specific calling conventions to be used. Target specific calling conventions start at 64.
+任何calling convention 都可以指定一个number, 允许使用target-specific calling conventions. Target specific calling conventions start at 64.
 
 ** visibility styles
 所有的全局变量和函数有如下的类型的visibility styles：
@@ -192,23 +185,23 @@ Any calling convention may be specified by number, allowing target-specific call
 可见的。default visibility对应于external linkage。
 
 2、hidden
-拥有hidden visibility的对象的两次声明指向同一个object如果声明在同一个共享的object中。通常hidden visibility表示symbol不会被放在dynamic symbol table，因此other module
+拥有hidden visibility的对象的两个声明引用同一个object如果声明在同一个共享的object中。通常hidden visibility修饰的symbol不会被放在dynamic symbol table，因此other module
 (executable or shared library) 不能直接引用它。
 
 3、protected
-在ELF文件里，protected visibility表明该symbol会放在dynamic symbol table里，但是在defining module中的references会和local symbol 绑定，该symbol 不能被其它module覆盖。
+在ELF文件里，protected visibility表明该symbol会放在dynamic symbol table里，但是在它的定义所在的module中的references会和local symbol 绑定，该symbol 不能被其它module覆盖。
 
 拥有internal 或者 private linkage的symbol 必定拥有default visibility。
 
-** DLL storage class
+** DLL storage class (Dynamic link library)
 所有的全局变量，函数以及Aliases只能有如下DLL storage class 之一：
 
 1、dllimport
-dllimport使得编译器通过一个全局指针的指针来引用function和variable，这个全局指针的指针通过DLL exporting symbol创建。
+dllimport使得编译器通过一个全局的指针的指针来引用function和variable，这个全局的指针的指针通过DLL exporting symbol创建。
 在微软平台上，指针的名字由__imp_结合函数或变量名来确定。
 
 2、dllexport
-dllexport使得编译器在DLL里提供一个指针的全局指针。在微软平台上，指针的名字由__imp_结合函数或变量名来确定。
+dllexport使得编译器在DLL里提供一个全局的指针的指针，这样它在引用时能带有dllimport attribute。在微软平台上，指针的名字由__imp_结合函数或变量名来确定。
 
 ** Thread Local storage models
 一个变量被定义为thread_local的，则它不会被threads共享，每个thread都会单独copy一份这个变量。
@@ -224,14 +217,29 @@ dllexport使得编译器在DLL里提供一个指针的全局指针。在微软�
 
 如果没有给出上述三种model之一，则使用general dynamic model，它对应于ELF TLS model。
 
+TLS model也能用于alias，但是它只控制alias如何被访问，而不会对aliasee产生影响。
+
+对于不支持 ELF TLS的平台，可以使用-femulated-tls flag来生成兼容GCC的仿TLS代码。
+
 ** Runtime Preemption specifiers
-全局变量，函数，aliases有一个可选的runtime preemption specifier。如果没有给定则symbol默认runtime preemption specifier为dso_preemptable。
+全局变量，函数，aliases有一个可选的runtime preemption specifier。如果没有给定则symbol默认的runtime preemption specifier为dso_preemptable。
 
 1、dso_preemptable
-表示functions或者variables可能被外部链接单元的symbol替换在运行时。
+表示functions或者variables能在运行时被外部链接单元的symbol替换。
 
 2、dso_local
-编译器假定runtime preemption specifier为dso_local的函数或变量会解析到当前链接单元。
+编译器假定runtime preemption specifier为dso_local的函数或变量会解析到当前链接单元。将会生成直接的访问接口，即使真正的定义不在当前的编译单元。
+
+** structure type
+llvm IR 允许指定identified structure 和 literal structure type。identified structure 结构不唯一， literal structure结构唯一。
+
+identified structure举例：
+#+BEGIN_SRC
+%mytype = type { %mytype*, i32 }
+#+END_SRC
+
+** Non-integral Pointer Type
+目前这种类型处于实验状态。
 
 ** global variable
 1、全局变量所占有的memory在编译时而不是程序运行的时候分配。
@@ -242,8 +250,8 @@ dllexport使得编译器在DLL里提供一个指针的全局指针。在微软�
 
 4、全局变量有一个linkage可选项。
 
-5、全局变量的定义或声明能有一个explicit section存放，并且有一个alignment可选项。如果explicit or inferred section information for the variable declaration and
-its definition the resulting behavior is undefined.
+5、全局变量的定义或声明能有一个explicit section存放，并且有一个alignment可选项。如果变量声明的section information和
+它的定义不匹配，就会产生undefined resulting behavior。
 
 6、被定义为global constant的变量的值无法修改，需要在runtime时初始化的variable无法被标记为constant。
 
@@ -256,7 +264,7 @@ its definition the resulting behavior is undefined.
 
 10、如果给定local_unnamed_addr属性，则它的address在当前module内都不重要。
 
-11、一个global variable能被声明保存在平台相关的标号的地址空间里，对于支持这种操作的target，address space可能会影响优化以及target使用什么指令访问该变量。默认
+11、一个global variable能被声明驻留在平台相关的标号的地址空间里，对于支持这种操作的target，address space可能会影响优化以及target使用什么指令访问该变量。默认
 的address space是0。地址空间的qualifier必须位于其它属性之前。
 
 12、LLVM 允许将一块section指定为global。global 能放在comdat如果target支持。
@@ -264,7 +272,7 @@ its definition the resulting behavior is undefined.
 13、external declaration 可能对应一个特定的section。section information保留在llvm ir中，将section information和附加在external declaration上则表示一种推断：
 它的声明一定位于该section。
 
-14、默认情况下，global initializer会被优化基于即设：定义在当前module内的全局变量的初始值在执行initializer前都不会修改。
+14、默认情况下，global initializer会被优化基于假设：定义在当前module内的全局变量的初始值在执行initializer前都不会修改。
 
 15、global的alignment必须得是2的幂次，如果没有提供alignment，或者被设为0，target会根据需要来设置它的取值。最大的alignment为1<<29。
 
@@ -332,7 +340,7 @@ Aliases有一个name和一个aliasee，aliasee要么是global value要么是cons
 #+END_SRC
 linkage的取值只能是private, internal, linkonce，weak，linkonce_odr，weak_odr，external之一。
 
-设置unnamed_addr则，alias的地址将和aliasee的地址指向同一object，没有设置unnamed_addr则它们拥有相同的address。
+设置unnamed_addr则alias的地址将和aliasee的地址指向同一object，没有设置unnamed_addr则它们拥有相同的address。
 
 local_unnamed_addr的含义和前面介绍的一样。
 
@@ -342,7 +350,7 @@ local_unnamed_addr的含义和前面介绍的一样。
 3、expression中的global value 不能是declaration。
 
 ** IFuncs
-不产生新的数据或函数，是dynamic linker在runtime时调用resolver function resolve的一个symbol。
+不产生新的数据或函数，是dynamic linker在runtime时调用resolver function 解析的一个symbol。
 IFuncs有一个name和resolver，这个resolver是一个函数，dynamic linker调用该函数返回另一个和这个name相关联的函数的地址。
 语法：
 #+BEGIN_SRC
@@ -351,6 +359,7 @@ IFuncs有一个name和resolver，这个resolver是一个函数，dynamic linker�
 
 ** Comdats
 关于comdat section的解释：
+
 The purpose of a COMDAT section is to allow "duplicate" sections to be defined in multiple object files. Normally, if the same symbol is defined in multiple object files,
 the linker will report errors. This can cause problems for some C++ language features, like templates, that may instantiate the same symbols in different cpp files.
 
@@ -362,6 +371,7 @@ There's no requirements, one way or the other, on what the contents of a COMDAT 
 of both code and data.
 
 补充解释：
+
 A Comdat section is a section in the object file, in which objects are placed, which can be duplicated in other object files. Each object has information for the linker,
 indicating what it must do when duplicates are detected. The options can be: Any — do anything, ExactMatch — duplicates must completely match, otherwise an error occurs,
 Largest — take the object with the largest value, NoDublicates — there should not be a duplicate, SameSize — duplicates must have the same size, otherwise an error occurs.
@@ -369,11 +379,11 @@ Largest — take the object with the largest value, NoDublicates — the
 总的来说：
 comdat用来存储重复定义的object，针对每个object给出链接时处理的方式。
 
-LLVM comdat 提供访问COFF和ELF目标文件中COMDAT的功能。
+LLVM comdat 提供访问COFF和ELF目标文件中COMDAT section的功能。
 
-Comdats 有个一个代表COMDAT key 的name，所有的global objects指定这个key的只有在最后的object file完结，如果linker选择了这个key，
+Comdats 有个一个代表COMDAT key 的name，如果linker选择了这个key，所有绑定这个key的global objects会出现在最后的object file，Aliases会放在它们对应的aliasee计算的COMDAT内。
 
-Comdats 有一个提供输入的选择类，关于linker如何在两个不同的object file中选择key
+Comdats有一个选择类型，可提供有关链接器如何在两个不同目标文件中的键之间进行选择的输入。
 
 语法：
 #+BEGIN_SRC
@@ -433,40 +443,40 @@ declare signext i8 @returns_signed_char()
 
 现有如下参数属性：
 1、zeroext
-这表明对于code generator：它所修饰的参数或返回值是zero-extended在target ABI所要求的范围内（对caller是parameter，对callee是返回值）。
+这向code generator表明：它所修饰的参数或返回值是zero-extended在target ABI所要求的范围内（对caller是parameter，对callee是返回值）。
 
 2、signext
-这表明对于code generator：它所修饰的参数或返回值是sign-extended在target ABI（通常是32位）所要求的范围内（对caller是parameter，对callee是返回值）。
+这向code generator表明：它所修饰的参数或返回值是sign-extended在target ABI（通常是32位）所要求的范围内（对caller是parameter，对callee是返回值）。
 
 3、inreg
 这表明这个参数或返回值在生成函数调用或返回的代码时，应该以一种特殊的和target相关的方式来处理，（通常将它放在寄存器中，而不是放在内存中）这个属性的使用是target-specific。
 
-4、byval or byval（<ty>）
-这表明指针参数应该按值传递的方式传递给函数，这隐含着caller和callee间指针的拷贝，因此callee无法修改caller中的值，这个属性只能用于llvm 指针参数。它通常用于结构体或数组的
+4、byval or byval（<ty>）（值传递）
+这表明指针的值才是实际传递给函数的，这隐含着caller和callee间指针的拷贝，因此callee无法修改caller中的值，这个属性只能用于llvm 指针参数。它通常用于结构体或数组的
 值传递，也可用于scalar。copy属于caller。这个属性无法用于返回值。
 
 byval也支持可选的type参数（<ty>），这个ty必须和pointee类型相同。
 
 byval 属性也支持指定一个alignment，如果alignment 没有给定，code generator 会根据target 来做出决定。
 
-5、byref（<ty>）
-byref允许指定一个参数的指向物的类型，这类似于byval，但不存在copy操作，参数通过stack来传递，通常不允许对byref pointer进行写操作，这种属性不适用于return value。
+5、byref（<ty>）（引用传递）
+byref允许给定pointee的memory类型参数，这类似于byval，但不存在copy操作，参数通过stack来传递，通常不允许对byref pointer进行写操作，这种属性不适用于return value。
 同byval一样，它也可以指定一个alignment。它主要用于表现ABI 的 constraints，无法被optimization使用。
 
-6、preallocated（<ty>）
-这表明pointer parameter是以值传递的方式传递给function的，而且pointer指向的内容pointee已经被初始化了在函数调用前，这种属性只适用于LLVM pointer arguments.
-The argument must be the value returned by the appropriate llvm.call.preallocated.arg on non musttail calls, or the corresponding caller parameter in musttail calls,
-although it is ignored during codegen.
-
-A non musttail function call with a preallocated attribute in any parameter must have a "preallocated" operand bundle. A musttail function call cannot have a
-"preallocated" operand bundle.
+6、preallocated（<ty>）(类似于指向数组的指针)
+这表明指针的值才是实际传递给函数的，而且pointer指向的内容pointee已经被初始化了在函数调用前，这种属性只适用于LLVM pointer arguments.
+这个参数必须是由llvm.call.preallocated.arg在非musttail 调用时的返回值。或者对应的在musttail call中caller 的参数。
 
 这种属性也支持可选的type参数（<ty>），这个ty必须和pointee类型相同。
 
 这种属性也支持指定一个alignment，如果alignment 没有给定，code generator 会根据target 来做出决定。
 
 7、inalloca
-这个属性使得caller可以取outgoing stack arguments的地址。inalloca的参数必须是由alloca instruction产生的指向stack memory的一个指针。
+这个属性使得caller可以取outgoing stack arguments的地址。inalloca的参数必须是由alloca instruction产生的指向stack memory的一个指针。alloca或allocation参数，必须
+也被标记上inalloca keyword。只有最后一个参数才有inalloca属性，而且这个参数保证会在memory中传递。
+
+一个在memory中分配的参数，只能被一次调用使用一次，因为call可能会收回它的memory，inalloca属性无法和其它的影响参数存储的的属性一起使用，例如like inreg, nest, sret,
+byval等。
 
 8、sret or sret(<ty>)
 这表明指针参数包含了源程序中一个函数返回值的结构的地址，这个地址必须由caller来保证其有效性。这种属性不适用于返回值。ty可选项的含义同上。
@@ -498,16 +508,19 @@ A non musttail function call with a preallocated attribute in any parameter must
 这表明参数或返回的指针是dereferenceable（访问指针指向的值）。这种属性只能用于指针类型的参数，可被dereferenceable的字节数必须在括号内提供。允许字节数小于pointee的字节数。
 nonnull属性并不意味着dereferenceable，
 
-17、swiftself
+17、dereferenceable_or_null(<n>)
+这表明参数或返回值不可能同时是null和non-dereferenceable的。
+
+18、swiftself
 这表明parameter是 self/context 参数，这种属性不适用于返回值，而且只能用于一个参数。
 
-18、swifterror
+19、swifterror
 这种属性来源于模仿和优化swift的error的处理，它只能用于带有指针的指针的参数或者指针大小的alloca。
 
-19、immarg
+20、immarg
 这表明该参数是一个immediate value（不是存储在memory或者register中的值），undef或者constant expression 不合法，只能用于intrinsic declaration，不能用于call site和函数。
 
-20、noundef
+21、noundef
 这种属性可以用于参数和返回值，如果value representation包含undefined或者posion bits，则会导致为定义的行为，这并不适用于type存储表示时引入的padding。
 
 ** Garbage Collector Strategy Names
@@ -533,9 +546,65 @@ define void @f() prefix i32 123 { ... }
 
 一个函数可能有prefix data但是没有函数主体，这在语义上类似于available_externally linkage，数据可能被用于optimize，但不会在object file中生成。
 
+** Prologue Data
+Prologue 属性允许任意字节编码的code插到函数体前。这能用于函数的hot-patching和检测
+具体来说，它必须以字节序列开头，该字节序列解码为对模块目标有效的机器指令序列，该指令将控制权转移到Prologue data之后的点，而不执行任何其他可见的操作。
+这使内联程序和其他pass可以推理出函数定义的语义，而无需理解Prologue Data。 这使得Prologue的格式target相关的。
+举例：
+#+BEGIN_SRC
+define void @f() prologue i8 144 { ... }
+#+END_SRC
+一个函数可能有prologue Data但是没有函数主体，这和available_externally linkage中的情形有些类似，数据只被用于优化，而不会出现在最终的object file中生成。
+
+** Personality Function
+personality属性允许函数指定使用什么函数处理exception。
+
+** Attribute Group
+Attribute Group在IR中是一组供object引用的属性，它们对于.ll文件的可读性很重要，因为很多函数会使用相同的属性。
+在最简单的情形，一个.ll文件对应一个.c文件，单个的attribute group将会捕捉重要的命令行参数来创建ll文件。
+
+Attribute Group是一个module级别的object，可以通过引用attribute group ID的形式来使用attribute group。当一个
+object使用多个attribute group时，不同组的attribute 会合并。
+
+举例：
+#+BEGIN_SRC
+; Target-independent attributes:
+attributes #0 = { alwaysinline alignstack=4 }
+
+; Target-dependent attributes:
+attributes #1 = { "no-sse" }
+
+; Function @f has attributes: alwaysinline, alignstack=4, and "no-sse".
+define void @f() #0 #1 { ... }
+#+END_SRC
+
+** Function Attributes
+Function attributes用于交流函数的额外的信息。Function attribute是函数的一部分，不是function type的一部分，因此拥有不同function attribute的函数
+可以拥有相同的function type。
+
+函数属性是排在function type后的一些关键字，如果有多个attribute，它们之间用空格隔开。例如：
+#+BEGIN_SRC
+define void @f() noinline { ... }
+define void @f() alwaysinline { ... }
+define void @f() alwaysinline optsize { ... }
+define void @f() optsize { ... }
+#+END_SRC
+下面是各属性的解释：
+
+1、alignstack(<n>)
+这个属性表明，在生成开头和结尾代码时，backend应该强制要求栈指针对齐，对齐值必须是2的幂次值。
+
+2、allocsize(<EltSizeParam>[, <NumEltsParam>])
+这个属性表明
 * runtime
 Runtime describes software/instructions that are executed while your program is running, especially those instructions that you did not write explicitly,
 but are necessary for the proper execution of your code.
+
+* storage class
+A storage class in the context of C++ variable declarations is a type specifier that governs the lifetime, linkage, and memory location of objects。
+A given object can have only one storage class. Variables defined within a block have automatic storage unless otherwise specified using the extern, static,
+or thread_local specifiers. Automatic objects and variables have no linkage; they are not visible to code outside the block. Memory is allocated for them
+automatically when execution enters the block and de-allocated when the block is exited.
 
 * outgoing stack arguments
 the caller has a preallocated area at the top of its stack frame to hold the arguments it supplies to other subroutines it calls. This area is sometimes
