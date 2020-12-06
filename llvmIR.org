@@ -595,11 +595,138 @@ define void @f() optsize { ... }
 这个属性表明，在生成开头和结尾代码时，backend应该强制要求栈指针对齐，对齐值必须是2的幂次值。
 
 2、allocsize(<EltSizeParam>[, <NumEltsParam>])
-这个属性表明
+这个属性表明annotated function总是至少返回一个给定数目字节数（或者NULL）。它的参数index从0开始编号。如果给定一个参数，则至少CallSite.Args[EltSizeParam]
+个字节返回，如果提供两个参数则CallSite.Args[EltSizeParam] * CallSite.Args[NumEltsParam]个字节返回。引用的参数必须是整型。
+
+3、alwaysinline
+这个属性表明inliner会尽可能的内联这个函数，为caller忽略掉inlining size限制。
+
+4、builtin
+这个属性表明位于call site 处的callee会被当作built-in 函数，即使该函数的声明使用了nobuiltin属性。这个属性适用的情形：在call site 处直接调用声明带有nobuiltin
+属性的函数。
+
+5、cold
+这个属性表明这个函数极少被调用。When computing edge weights（应用场景是什么?）, basic blocks post-dominated by a cold function call are also considered to be cold; and, thus, given low weight.
+
+6、convergent
+在某些并行执行的模型种，存在无法根据任何其他的值确立control-dependent的操作，llvm IR称这些operation 为 convergent。这个属性可能出现在function或者call/invoke指令。当出现在function，则这个函数的
+调用不应是依赖于其它值的control-dependent的。当它出现在call/invoke时，我们应该将call当作calling convergent function。
+
+7、inaccessiblememonly
+这个属性表明该函数只能访问正在被编译的模块无法访问的memory。
+
+8、inaccessiblemem_or_argmemonly
+此属性表示该函数只能访问要么无法被正在编译的模块访问，要么由其指针参数指向的内存。
+
+9、inlinehint
+此属性表示源代码包含内联这个函数的暗示。
+
+10、jumptable
+此属性表示应在code-generation时将该函数添加到jump指令表中，并且对该函数的所有地址引用均应替换为对相应jump指令表函数指针的引用。 这将为原始函数创建一个新的指针，这意味着依赖于函数指针身份的代码可能会中断。
+ 因此，任何带有jumptable的函数也必须是unnamed_addr的。
+
+11、minsize
+此属性表明optimization pass和code generator pass会做出选择，以使该函数的代码大小尽可能小，并执行可能牺牲运行时性能的优化，以最小化所生成代码的大小。
+
+12、naked
+此属性会关闭函数prologue/epilogue的生成。
+
+13、"no-inline-line-tables"
+当此属性设置为true时，内联程序在内联代码时会丢弃源位置，而是使用call site的源位置。
+
+14、no-jump-tables
+当此属性设置为true时，将禁用通过switch case lowering生成jump table 和 lookup table。
+
+15、nobuiltin
+这表明call site处的callee function不会被认定为built-in function。 LLVM将保留原始调用，并且不会根据built-in function的语义将其替换为等效代码，除非call site使用builtin属性。 这在call site以及函数声明和定义上有效。
+
+16、noduplicates
+此属性指示无法重复(duplicated)调用该函数。 调用noduplicate函数可以在其移到parent内，但不能在parent函数内重复。
+
+17、nofree
+此函数属性指示该函数没有直接或间接调用内存释放函数（例如free函数）。
+
+18、noimplicitfloat
+此属性禁用隐式浮点指令。
+
+19、noinline
+此属性表示inliner在任何情况下都不应内联此函数。
+
+20、nomerge
+此属性表示在优化过程中永远不要合并对此函数的调用。该属性使用户可以控制代码大小和调试信息精度之间的折衷。
+
+21、nonlazybind
+此属性抑制该函数的lazy symbol binding。
+
+22、noredzone
+此属性表明，即使target-specific ABI允许，代码生成器也不应使用red zone（？？？）。
+
+23、indirect-tls-seg-refs
+此属性表示code generator 不应使用通过段寄存器的直接TLS访问，即使target-specific ABI允许。
+
+24、noreturn
+此函数属性表示该函数从不正常返回，因此通过返回指令。 如果函数曾经动态返回，则会在运行时产生不确定的行为。
+
+25、norecurse
+此函数属性表示该函数不会直接或间接通过任何可能的调用路径进行调用自身（不会递归调用）。
+
+26、willreturn
+该函数属性表示对该函数的调用将显示未定义的行为，或者将返回并继续在现有调用堆栈中包含当前调用的某个点处执行。
+
+27、nosync
+该函数属性表示该函数不通过memory或其他well-defined的方式与另一个线程进行通信（同步）。
+
+28、nounwind
+该函数属性表示该函数从不引发异常。 如果函数确实引发异常，则其运行时行为未定义。
+
+29、null_pointer_is_valid
+如果设置了null_pointer_is_valid，则将地址空间0中的null address视为内存加载和存储的有效地址。 在该函数中，任何分析或优化都不应将dereferencing a pointer to null视为未定义的行为。
+
+30、optforfuzzing
+此属性表示应针对maximum fuzzing signal（？？？）优化此函数。
+
+31、optnone
+此函数属性表示大多数优化过程将跳过此函数，过程间优化除外。 code generator默认为 fast 指令选择器。 此属性不能与alwaysinline属性一起使用； 此属性也与minsize属性和optsize属性不兼容。
+
+此属性还要求在函数上指定noinline属性，因此该函数永远不会内联到任何caller中。
+
+32、optsize
+此属性表明optimization passes和code generator passes会做出一些选择，以使该函数的代码量保持较低，否则，只要不显著影响运行时性能，就进行优化以减小代码量。
+
+33、"patchable-function"
+此属性告诉代码生成器，为此函数生成的代码需要遵循某些约定，以使运行时函数可以在以后对其进行修补。
+
+34、"probe-stack"
+此属性表示该函数将开辟堆栈末尾的保护区域。 这样可以确保对堆栈的访问不得超出保护区到堆栈先前访问区域的距离。
+
+35、readnone
+
+
+
+* lazy symbol binding
+Lazy binding is controlled by the -z option to the linker, ld. This option takes keywords as an argument; the keywords include (among others):
+
+1、lazy
+
+When generating an executable or shared library, mark it to tell the dynamic linker to defer function-call resolution to the point when the function is called (lazy binding), rather than at load time.
+
+2、now
+
+ When generating an executable or shared library, mark it to tell the dynamic linker to resolve all symbols when the program is started, or when the shared library is linked to using dlopen(), instead
+of deferring function-call resolution to the point when the function is first called.
+
+lazy binding的原因：
+
+Doing things as late as possible:
+
+(a) reduces the work incurred to start up；
+
+(b) avoids that work altogether if that execution path is never taken. This is true not just for the linker, but any execution that you can delay until needed。
 * runtime
 Runtime describes software/instructions that are executed while your program is running, especially those instructions that you did not write explicitly,
 but are necessary for the proper execution of your code.
-
+* control dependency
+程序执行过程中的控制依赖关系，厘清每条语句的执行依赖于其它哪些语句。A node (basic block) Y is control-dependent on another X iff X determines whether Y executes。
 * storage class
 A storage class in the context of C++ variable declarations is a type specifier that governs the lifetime, linkage, and memory location of objects。
 A given object can have only one storage class. Variables defined within a block have automatic storage unless otherwise specified using the extern, static,
@@ -611,7 +738,12 @@ the caller has a preallocated area at the top of its stack frame to hold the arg
 termed the outgoing arguments area or callout area。
 * storage class specifier
 auto register static extern _Thread_local
+* function annotations
+对函数参数，返回值的一种修饰限定，是一些可选项，在编译和链接时能传递更多信息。
 
+C++ function annotations:https://docs.microsoft.com/en-us/cpp/code-quality/annotating-function-parameters-and-return-values?view=msvc-160
+
+python function annotations:https://www.tutorialspoint.com/function-annotations-in-python
 * tail call
 函数在code block的结尾被调用，即为tail call。
 
