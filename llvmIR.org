@@ -700,8 +700,352 @@ define void @f() optsize { ... }
 此属性表示该函数将开辟堆栈末尾的保护区域。 这样可以确保对堆栈的访问不得超出保护区到堆栈先前访问区域的距离。
 
 35、readnone
+在函数上，此属性表示该函数严格根据其参数计算其结果（或决定解除异常），而无需访问任何指针参数指向的内容或以其他方式访问对caller function可见的任何可变状态（例如，内存，控制寄存器等）。
+它不会写入任何指针参数（包括byval参数），并且永远不会更改caller可见的任何状态。这意味着尽管它无法通过调用C++异常抛出方法来消除异常（因为它们已写入内存），但可能存在非C++
+机制抛出异常而未写入LLVM可见内存。
+
+在参数上，此属性表示该函数不会访问该指针参数指向的内容，即使该函数可以通过其他指针进行访问也可以读取或写入该指针指向的内存。
+
+36、readonly
+在函数上，此属性表示该函数不会通过任何指针参数（包括byval参数）进行写操作，也不以其他方式修改caller function可见的任何状态（例如内存，控制寄存器等）。
+
+对于参数，此属性表示该函数不会通过该指针参数进行写入，即使它可能会写入指针所指向的内存。
+
+37、"stack-probe-size"
+此属性控制堆栈检测的操作：“probe-stack”属性或ABI必需的堆栈检测（如果有）。 它定义了保护区域的大小。 它确保如果函数使用的堆栈空间大于保护区域的大小，则将发起堆栈检测。
+它采用一个必需的整数值，默认情况下为4096。
+
+38、"no-stack-arg-probe"
+这个属性取消了ABI所需的stack probes，如果有。
+
+39、writeonly
+在函数上，这个属性表示该函数只写但不从memory读取内容。
+
+在参数上，这个属性表示函数只通过这个指针写而不通过这个指针读取数据。
+
+40、argmemonly
+该属性表示函数内部唯一的memory访问是从其指针类型的参数所指向的对象（具有任意偏移量）进行的load和store。 换句话说，该函数中的所有memory操作只能使用基于其函数参数的指针
+来访问memory。
+
+请注意，argmemonly可以与readonly属性一起使用，以指定该函数仅从其参数读取。
+
+41、returns_twice
+此属性表示此函数可以返回两次。 C 的setjmp是这类函数的一个示例。 编译器会禁用这些函数的caller程序中的某些优化（例如tail calls）。
+
+42、safestack
+此属性表示此函数启用了SafeStack保护。
+
+Safestack是一种instrumentation pass，可以保护程序免受基于堆栈缓冲区溢出的攻击，而不会增加任何明显的性能开销。
+
+43、sanitize_address
+此属性表示此函数启用了AddressSanitizer检查（动态地址安全分析）。
+
+AddressSanitizer（或ASan）是Google的开源编程工具，可检测memory损坏错误，例如缓冲区溢出或对悬空指针（dangling pointer）的访问（访问释放后的指针）。
+
+44、sanitize_memory
+此属性表示该函数启用了MemorySanitizer检查（动态检测对未初始化memory的访问）。
+
+45、sanitize_thread
+此属性表示此函数启用了ThreadSanitizer检查（动态线程安全分析）。
+
+46、sanitize_hwaddress
+此属性表示此函数启用了HWAddressSanitizer检查（基于标记指针的动态地址安全性分析）。
+
+47、sanitize_memtag
+此属性表示此函数启用MemTagSanitizer检查（基于Armv8 MTE的动态地址安全分析）。
+
+48、speculative_load_hardening
+此属性表示此函数启用speculative load hardening。
+
+speculative load hardening是一种削弱信息泄漏攻击的措施，该攻击利用控制流未命中（尤其是是否采用分支的未命中）进行信息泄漏攻击。
+（https://llvm.org/docs/SpeculativeLoadHardening.html）
+
+49、speculatable
+该函数属性表示该函数除计算其结果外没有任何其它的影响，并且没有undefined behavior。
+
+50、ssp
+此属性表示函数应采用stack smashing protector。它采用“ canary”的形式：将随机值放置在堆栈上，然后从函数返回时检查局部变量，以查看其是否已被覆盖。
+
+51、sspreq
+此属性表示函数应采用stack smashing protector，它会覆盖ssp属性。
+
+52、sspstrong
+此属性表示函数应采用stack smashing protector。 在确定函数是否需要堆栈保护器时，此属性会导致使用强启发式。它会覆盖ssp属性。
+
+53、strictfp
+此属性表示从要求严格浮点语义的scope调用了该函数。
+
+54、"denormal-fp-math"
+这表示可以为默认浮点环境的进行异常处理。
+
+55、"denormal-fp-math-f32"
+同denormal-fp-math一样，但是处理的是32位浮点型。
+
+56、thunk
+此属性表示该函数将通过tail call委派给其他函数。
+
+57、uwtable
+此属性表示target ABI要求为此函数生成unwind table entry。
+
+58、nocf_check
+此属性表示将不会对属性实体执行控制流检查。
+
+59、shadowcallstack
+此属性表示该函数启用ShadowCallStack检查。 instrumentation会检查函数prolog和epilog之间函数的返回地址是否未更改。
+
+60、mustprogress
+此属性表示需要该函数以可观测的方式返回，展开或与环境交互。例如： 通过易失性存储器访问，I / O或其他同步。
+
+** call site attributes
+下列是专用于call site 的属性：
+
+1、vector-function-abi-variant
+该属性可以附加到调用中，以列出与该函数关联的vector function。 注意，该属性不能附加到invoke或callbr指令上。
+
+当被设置时，该属性通知编译器此函数具有相应的vector variant（可用于对向量执行的并发调用）。
+
+2、preallocated(<ty>)
+调用llvm.call.preallocated.arg时需要此属性，而不能在任何其他call中使用。
 
 
+
+
+
+
+** Global Attributes
+对于全局变量也可以设置属性来传递更多的信息。全局变量的属性被分组为单个属性组（attribute group）。具体的可以查看attribute group。
+
+** Operand Bundles
+operand bundles是可以与某些LLVM指令（当前仅call和invoke）相关联的SSA value的tag集。 从某种意义上说，它们就像元数据，但是删除它们会改变程序的语义。
+
+语法：
+#+BEGIN_SRC
+operand bundle set ::= '[' operand bundle (, operand bundle )* ']'
+operand bundle ::= tag '(' [ bundle operand ] (, bundle operand )* ')'
+bundle operand ::= SSA value
+tag ::= string constant
+#+END_SRC
+operand bundles是一种通用的机制，它为managed language提供类似runtime-introspection（type introspection）的功能。它的确切语义取决于bundle tag。
+
+下面为一些具体的operand bundles的类型：
+
+1、Deoptimization operand bundles
+
+Deoptimization operand bundles 的对应的 operand bundle tag 值为 “deopt”。These operand bundles represent an alternate “safe” continuation for the call site
+they’re attached to，可以由合适的运行时使用，以在指定的call site deoptimize已编译的帧。
+从编译器的角度来看，deoptimization operand bundles 使它们连接的call site至少是只读的。它们会读取所有其指针类型的操作数（即使没有进行转义也是如此）和整个可见堆。
+
+2、Funclet Operand Bundles
+Funclet operand bundles的特征是“funclet” bundle tag。这些operand bundles表示call site在特定的funclet中。 call site最多可以连接一个“funclet” operand bundle，
+并且它必须恰好具有一个operand bundle。
+
+Funclet是父函数的区域，可以将其视为具有特殊调用约定的函数指针。
+
+3、GC Transition Operand Bundles
+GC转换operand bundles的特征在于“ gc-transition”operand bundle tag。这些operand bundles将call标记为具有一个GC策略的函数到具有不同GC策略的函数之间的transition。
+
+4、Assume Operand Bundles
+llvm.assume上的operand bundles允许表示这样的假设：参数属性或函数属性在特定位置具有特定值。
+
+5、Preallocated Operand Bundles
+Preallocated Operand Bundles的特征在于“preallocated”的operand bundle tag。这些operand bundles允许将call argument memory的分配与call site分开。
+
+6、GC Live Operand Bundles
+“gc-live” operand bundles 仅在 gc.statepoint intrinsic 上有效。 operand bundles必须包含指向垃圾收集对象的每个指针，该对象可能需要由垃圾收集器进行更新。
+
+** Module-Level Inline Assembly
+module可以包含“module-level inline asm”块，它对应于GCC“file scope inline asm”块。 这些块由LLVM在内部连接，并被视为一个单元，但如果需要，可以在.ll文件中分开。
+
+语法：
+#+BEGIN_SRC
+module asm "inline asm code goes here"
+module asm "more can go here"
+#+END_SRC
+
+** Data Layout
+module可以指定target specific data layout 字符串，该字符串指定如何在内存中布局数据。
+
+语法：
+#+BEGIN_SRC
+target datalayout = "layout specification"
+#+END_SRC
+
+layout字符串的内容由“-”（减号）分隔，具体参数如下：
+
+E 表示target 数据以big-endian 形式存储。
+
+e 表示target 数据以little-endian 形式存储。
+
+S<size> 以位为单位指定堆栈的自然对齐方式。堆栈对齐必须是8位的倍数。
+
+P<address space> 指定与程序存储器相对应的地址空间。
+
+G<address space> 指定创建全局变量时默认使用的地址空间。如果省略，则全局地址空间默认为默认地址空间0。
+
+A<address space> 指定由“alloca”创建的对象的地址空间。默认为默认地址空间0。
+
+p[n]:<size>:<abi>:<pref>:<idx> 这指定了指针的大小以及地址空间n的<abi>和<pref> erred对齐方式。 第四个参数<idx>是用于地址计算的索引大小。
+如果未指定，则默认索引大小等于指针大小。 所有大小均以位为单位。 地址空间n是可选的，如果未指定，则表示默认地址空间0。n的值必须在[1,2 ^ 23）
+范围内。
+
+i<size>:<abi>:<pref> 这指定给定位<size>的整数类型的alignment。 <size>的值必须在[1,2 ^ 23）范围内。
+
+v<size>:<abi>:<pref> 这指定给定位<size>的vector类型的alignment。
+
+f<size>:<abi>:<pref> 这指定给定位<size>的浮点类型的alignment。
+
+a:<abi>:<pref> 这指定aggregate type （复合类型）的对象的alignment。
+
+F<type><abi> 这指定函数指针的alignment，可选的type有：1、i:函数指针的alignment与函数的对齐方式无关，并且是<abi>的倍数。
+2、n:函数指针的alignment是函数上指定的显式对齐方式的倍数，也是<abi>的倍数。
+
+m:<mangling> 如果有指定，llvm names 在输出中会mangled（重命名）。有如下的mangling style 选项：1、e：ELF mangling，私有symbol有.L 前缀。2、m:
+Mips mangling:私有symbol有$前缀。3、o:Mach-O mangling:私有symbol有L前缀，其它symbol有_(下划线)前缀。4、x：Windows x86 COFFmangling：私有symbol获得通常的前缀。
+5、w：Windows COFF mangling：与x相似，不同之处在于普通C符号不接收_（下划线）前缀。6、a：XCOFF mangling：私有symbol获得L..前缀。
+
+n<size1>:<size2>:<size3>... 这将为target CPU指定一组本机整数宽度（以位为单位）。 例如，对于32位PowerPC，它可能包含n32；对于PowerPC 64，它可能包含n32：64；
+对于X86-64，它可能包含n8：16：32：64。 该集合的元素被认为可以有效地支持大多数常规算术运算。
+
+ni:<address space0>:<address space1>:<address space2>...这将具有指定地址空间的指针类型指定为Non-Integral Pointer Type。 0地址空间不能指定为非整数。
+
+在每个采用<abi>：<pref>的实例中，指定<pref> alignment是可选的。 如果省略，则前面的：也应省略，并且<pref>将等于<abi>。
+
+mid-level optimizers使用data layout 字符串来改进代码，并且仅当它与最终code generator使用的字符串匹配时，此字符串才有效。
+
+** Target Triple
+module可以指定描述目标主机的target triple字符串。例如：
+#+BEGIN_SRC
+target triple = "x86_64-apple-macosx10.7.0"
+#+END_SRC
+target triple 字符串由一系列由减号字符（'-'）分隔的标识符组成。规范形式为：
+#+BEGIN_SRC
+ARCHITECTURE-VENDOR-OPERATING_SYSTEM
+ARCHITECTURE-VENDOR-OPERATING_SYSTEM-ENVIRONMENT
+#+END_SRC
+此信息将传递给backend，以便它为正确的体系结构生成代码。可以使用-mtriple命令行选项在命令行中覆盖此设置。
+
+** Pointer Aliasing Rules
+任何memory访问都必须通过与该memory访问的地址范围相关联的指针值来完成，否则该行为是不确定的。指针值根据以下规则与地址范围相关联：
+
+1、指针值与与其所基于的任何值相关联的地址相关联。
+
+2、全局变量的地址与变量storage的地址范围相关联。
+
+3、allocation instruction的结果值与allocated storage的地址范围相关联。
+
+4、默认地址空间中的空指针没有地址关联。
+
+5、任何地址空间中的undef值都没有地址。
+
+6、除零以外的整数常量或从LLVM中未定义的函数返回的指针值可与通过LLVM提供的机制以外的机制分配的地址范围相关联。此类范围不得与LLVM提供的机制分配的地址范围重叠。
+
+基于其它指针值来确定的指针值的规则：
+
+1、由标量getelementptr操作形成的指针值基于getelementptr的指针类型的操作数。
+
+2、向量getelementptr操作的结果的lane l中的指针基于getelementptr的指针矢量类型的操作数的lane l中的指针。
+
+3、bitcast的结果值基于bitcast的operand。
+
+4、由inttoptr形成的指针值基于（直接或间接）有助于计算指针值的所有指针值。
+
+5、“基于”关系是可传递的。
+
+** Volatile Memory Accesses
+某些memory访问（例如load，store和llvm.memcpy）可能被标记为volatile。optimizer不得更改volatile操作的数量或相对于其他volatile操作更改其执行顺序。optimizer可以改变volatile
+操作相对于non-volatile操作的顺序。
+
+volatile load 或 store 可能具有其他target-specific的语义。任何volatile操作都可能产生副作用，并且任何volatile操作都可以读取或修改状态，而该状态不能通过常规load或store在此
+模块中访问。volatile操作可能使用不指向内存的地址（如MMIO寄存器）。
+
+volatile访问所允许的副作用是有限的。如果将非volatile存储器存储到给定地址是合法的，则volatile操作可能会修改该地址处的memory。volatile操作可能不会修改正在编译的模块可访问的
+任何其他memory。volatile操作可能不会在当前模块中调用任何代码。
+
+编译器可能会假定执行将在volatile操作之后继续进行，因此可以将修改memory或可能具有未定义行为的操作挂起通过volatile操作。
+
+** Memory Model for Concurrent Operations
+LLVM IR没有定义任何启动并行执行线程或注册信号处理程序的方法。尽管如此，还是有platform-specific的方式来创建它们，并且我们定义了LLVM IR的行为。该模型的灵感来自C ++ 0x内存模型。
+使用介绍可参考https://llvm.org/docs/Atomics.html
+
+** Atomic Memory Ordering Constraint
+atomic instruction（cmpxchg，atomicrmw，fence，automic load和automic store）采用排序参数，这些参数确定与它们同步的同一地址上的哪些其他atomic instruction。
+关于ordering constraint，在https://llvm.org/docs/Atomics.html 也有介绍。
+
+** Floating-Point Environment
+默认的LLVM浮点环境假定浮点指令没有副作用。结果假设取整为最近的取整模式。 在这种环境下，不维护任何浮点异常状态。 因此，没有尝试创建或保留无效操作（SNaN）或除以零的异常。
+
+** Fast-Math Flags
+LLVM IR浮点运算（fneg，fadd，fsub，fmul，fdiv，frem，fcmp），phi，select和call可能会使用以下flags来启用不安全的浮点转换。
+
+1、nnan
+没有NaN，允许optimizations假设参数和结果不是NaN。 如果参数是nan，或者结果将是nan，则会生成poison value。
+
+2、ninf
+没有Infs，允许optimizations假设参数和结果不是+/- Inf。 如果参数为+/- Inf，或者结果为+/- Inf，则会生成poison value。
+
+3、nsz
+没有signed zero，允许optimizations将零参数或结果的符号视为无关紧要。
+
+4、arcp
+允许倒数-允许optimizations使用参数的倒数而不是执行除法。
+
+5、contract
+允许浮点收缩（例如，将乘法后接加法融合成乘加）。这不能重新组合以形成任意收缩。例如，（a * b）+（c * d）+ e不能转换为（a * b）+（（c * d）+ e）来创建两个fma运算。
+
+6、afn
+近似函数-允许用近似计算替代函数（正弦，对数，平方根等）。
+
+7、reassoc
+允许对浮点指令进行重新关联转换。 这可能会改变浮点数的结果。
+
+8、fast
+这个flag包含所有其它flags。
+
+** Use-list Order Directives
+use-list directives 对每个use-list的内存顺序进行编码，允许重新创建该顺序。<order-indexes>是分配给参考值使用的逗号分隔列表的索引。 引用值的use-list会按这些索引排序。
+
+use-list directives 可能出现在函数的scope或全局scope。它们不是instructions，对IR 的语义也没有影响，当它们出现在函数内，它们必须位于函数最后的basic block的terminator
+之后。
+
+如果basic block 使用blockaddress()表达式来取它的地址，uselistorder_bb可以用来重排它们的use-list从函数范围外。
+
+语法：
+#+BEGIN_SRC
+uselistorder <ty> <value>, { <order-indexes> }
+uselistorder_bb @function, %block { <order-indexes> }
+#+END_SRC
+
+例子：
+#+BEGIN_SRC
+define void @foo(i32 %arg1, i32 %arg2) {
+entry:
+  ; ... instructions ...
+bb:
+  ; ... instructions ...
+
+  ; At function scope.
+  uselistorder i32 %arg1, { 1, 0, 2 }
+  uselistorder label %bb, { 1, 0 }
+}
+
+; At global scope.
+uselistorder i32* @global, { 1, 2, 0 }
+uselistorder i32 7, { 1, 0 }
+uselistorder i32 (i32) @bar, { 1, 0 }
+uselistorder_bb @foo, %bb, { 5, 1, 3, 2, 0, 4 }
+#+END_SRC
+
+** Source Filename
+源文件名字符串设置为原始module identifier，当通过clang前端从源代码进行编译时，该文件名将是已编译源文件的名称。IR和bitcode会保留它。
+
+当前，对于在profile data中使用的local function生成一致的唯一全局标识符是必要的，该标识符将源文件名附加到local function名之前。
+
+举例：
+#+BEGIN_SRC
+source_filename = "/path/to/source.c"
+#+END_SRC
+
+* Type System
 
 * lazy symbol binding
 Lazy binding is controlled by the -z option to the linker, ld. This option takes keywords as an argument; the keywords include (among others):
@@ -744,6 +1088,9 @@ auto register static extern _Thread_local
 C++ function annotations:https://docs.microsoft.com/en-us/cpp/code-quality/annotating-function-parameters-and-return-values?view=msvc-160
 
 python function annotations:https://www.tutorialspoint.com/function-annotations-in-python
+* poison value
+poison is a special value that represents a violation of an assumption。
+undef of type T is the set consisting of all defined values of T。
 * tail call
 函数在code block的结尾被调用，即为tail call。
 
