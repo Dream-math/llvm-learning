@@ -1046,6 +1046,374 @@ source_filename = "/path/to/source.c"
 #+END_SRC
 
 * Type System
+LLVM type 系统是IR的最重要特征之一。 type 确定了，可以直接在IR上执行许多优化，而不必在转换之前在侧面进行额外的分析。强大的类型系统使读取生成的代码更容易，
+
+** Void Type
+void type 不表示任何值而且没有size。
+
+语法：
+#+BEGIN_SRC
+void
+#+END_SRC
+** Function Type
+可以将函数类型视为函数签名。 它由返回类型和参数类型列表组成。 函数类型的返回类型是void类型或first class type，label和metadata type除外。
+
+语法：
+#+BEGIN_SRC
+<returntype> (<parameter list>)
+#+END_SRC
+<parameter list>是由逗号分隔的类型标识符。若参数list包含省略号，则表示该函数拥有可变的参数个数，可变参数函数可以通过variable argument handling intrinsic函数
+访问它们的参数，<returntype>可以是除了label和metadata外的任何类型。
+
+举例：
+#+BEGIN_SRC
+i32 (i32)	;function taking an i32, returning an i32
+float (i16, i32 *) *	;Pointer to a function that takes an i16 and a pointer to i32, returning float.
+i32 (i8*, ...)	;A vararg function that takes at least one pointer to i8 (char in C), which returns an integer. This is the signature for printf in LLVM.
+{i32, i32} (i32)	;A function taking an i32, returning a structure containing two i32 values
+#+END_SRC
+
+** First Class Type
+这种类型的值是只能由instruction生成的值。（通常包含可以作为函数返回值的类型，可以作为参数传递给函数的类型）
+
+*** Single Value Types
+从CodeGen的角度来看，这些是在寄存器中有效的类型。
+**** Integer Type
+整数类型是一种非常简单的类型，它简单地为所需的整数类型指定任意位宽。 可以指定从1位到2^23-1（约800万）的任何位宽度。
+
+语法：
+#+BEGIN_SRC
+iN
+#+END_SRC
+整数将占用的位数由N值指定。
+
+例子：
+#+BEGIN_SRC
+i1	;a single-bit integer.
+i32	;a 32-bit integer.
+i1942652	;a really big integer of over 1 million bits.
+#+END_SRC
+
+**** Floating-Point Types
+| 类型      | 解释                                                                     |
+|-----------+--------------------------------------------------------------------------|
+| half      | 16位浮点值                                                               |
+| bfloat    | 16位浮点值（7位有效）。提供与float相同的指数位数，因此它与动态范围匹配， |
+|           | 但精度大大降低。在Intel的AVX-512 BF16扩展和Arm的ARMv8.6-A扩展中使用。    |
+| float     | 32位浮点值                                                               |
+| double    | 64位浮点值                                                               |
+| fp128     | 128位浮点值（112位有效位）                                               |
+| x86_fp80  | 80位浮点值（X87）                                                        |
+| ppc_fp128 | 128位浮点值（2个64位）                                                   |
+|-----------+--------------------------------------------------------------------------|
+half，float，double和fp128的二进制格式分别对应于IEEE-754-2008的binary16，binary32，binary64和binary128规范。
+
+**** X86_mmx Type
+x86_mmx类型表示x86计算机上MMX寄存器中保存的值。这种类型允许的操作非常有限：参数和返回值，load和store以及bitcast。 用户指定的MMX指令表示为带有此类型的参数或
+结果的intrinsic或asm调用。 没有这种类型的数组，向量或常量。
+
+语法：
+#+BEGIN_SRC
+x86_mmx
+#+END_SRC
+
+**** Pointer Type
+指针类型用于指定memory位置。 指针通常用于引用memory中的对象。
+
+指针类型可能具有可选的地址空间属性，该属性定义了指向对象所驻留的编号地址空间。 默认地址空间编号为零。 非零地址空间的语义是target-specific。
+
+请注意，LLVM不允许指向void（void *）的指针，也不允许指向标签（label *）的指针。请改用i8 *。
+
+语法：
+#+BEGIN_SRC
+<type> *
+#+END_SRC
+
+例子：
+#+BEGIN_SRC
+[4 x i32]*	;A pointer to array of four i32 values.
+i32 (i32*) *	;A pointer to a function that takes an i32*, returning an i32.
+i32 addrspace(5)*	;A pointer to an i32 value that resides in address space #5.
+#+END_SRC
+
+**** Vector Type
+向量类型是表示元素向量的简单派生类型。 使用单个指令（SIMD）并行操作多个基本数据时，将使用向量类型。 向量类型需要size（元素个数），基础原始数据类型和可扩展属性，
+以表示在编译时实际硬件向量长度未知的向量。
+
+语法：
+#+BEGIN_SRC
+< <# elements> x <elementtype> >          ; Fixed-length vector
+< vscale x <# elements> x <elementtype> > ; Scalable vector
+#+END_SRC
+
+元素个数是一个大于0的恒定整数值；elementtype可以是任何整数，浮点数或指针类型。不允许size为零的向量。对于可扩展向量，元素总数是指定元素数量的常数倍（称为vscale）；
+ vscale是一个正整数，在编译时未知，并且和在运行时所有可扩展(scalable)向量的硬件相关常数相同。 因此，即使在运行时才能确定确切的字节size，IR中特定scalable vector类型
+的大小也不变。
+
+例子：
+#+BEGIN_SRC
+<4 x i32>	;Vector of 4 32-bit integer values.
+<8 x float>	;Vector of 8 32-bit floating-point values.
+<2 x i64>	;Vector of 2 64-bit integer values.
+<4 x i64*>	;Vector of 4 pointers to 64-bit integer values.
+<vscale x 4 x i32>	;Vector with a multiple of 4 32-bit integer values.
+#+END_SRC
+
+*** Label Type
+label type 表示code label。
+
+语法：
+#+BEGIN_SRC
+label
+#+END_SRC
+
+*** Token Type
+当一个值与一条指令相关联时使用token type，但该值的所有使用都不得试图introspect or obscure it。因此，phi或select不适合与token type一起使用。
+
+语法：
+#+BEGIN_SRC
+token
+#+END_SRC
+
+*** Metadata Type
+元数据类型表示嵌入式元数据。 除函数参数外，不能从元数据创建派生类型。
+
+语法：
+#+BEGIN_SRC
+metadata
+#+END_SRC
+
+*** Aggregate Types
+Aggregate types是派生类型的子集，可以包含多个成员类型。数组和结构是aggregate types。向量不被视为aggregate types。
+
+**** Array Type
+数组类型是一种非常简单的派生类型，可以将元素顺序排列在memory中。数组类型需要size（元素个数）和基础数据类型。
+
+语法：
+#+BEGIN_SRC
+[<# elements> x <elementtype>]
+#+END_SRC
+元素个数是一个恒定的整数值； elementtype可以是任何具有size的类型。
+
+例子：
+#+BEGIN_SRC
+[40 x i32]	;Array of 40 32-bit integer values.
+[41 x i32]	;Array of 41 32-bit integer values.
+[4 x i8]	;Array of 4 8-bit integer values.
+[3 x [4 x i32]]	;3x4 array of 32-bit integer values.
+[12 x [10 x float]]	;12x10 array of single precision floating-point values.
+[2 x [3 x [4 x i16]]]	;2x3x4 array of 16-bit integer values.
+#+END_SRC
+可以在长度为零的数组类型的LLVM中实现一维“可变大小数组”寻址。
+
+**** Structure Type
+结构类型用于表示内存中数据成员的集合。结构的元素可以是具有size的任何类型。
+
+使用load和store结合getelementptr指令获取指向字段的指针来访问内存中的structure。使用extractvalue和insertvalue指令访问寄存器中的structure。
+
+structure可以是packed结构，表示结构的alignment是一个字节，并且成员之间没有填充。在未压缩的structure中，将按module中DataLayout字符串的定义插入field types之间的填充，
+这要求与底层的code generator的期望相吻合。
+
+结构可以是literal或identified。literal结构是与其他类型内联定义的（例如{i32，i32} *），而identified structure总是在顶层使用name进行定义。literal structure的内容是唯一的，
+并且由于无法更改，因此不能是递归的或不透明的（opaqued）。标识的类型可以是递归的，可以是不透明的，并且从不唯一。
+
+语法：
+#+BEGIN_SRC
+%T1 = type { <type list> }     ; Identified normal struct type
+%T2 = type <{ <type list> }>   ; Identified packed struct type
+#+END_SRC
+
+例子：
+#+BEGIN_SRC
+{ i32, i32, i32 }	;A triple of three i32 values
+{ float, i32 (i32) * }	;A pair, where the first element is a float and the second element is a pointer to a function that takes an i32, returning an i32.
+<{ i8, i32 }>	;A packed struct known to be 5 bytes in size.
+#+END_SRC
+
+**** Opaque Structure Types
+不透明结构类型用于表示没有指定主体的命名结构类型。例如，这对应于C语言中的forward declared structure。
+
+语法：
+#+BEGIN_SRC
+%X = type opaque
+%52 = type opaque
+#+END_SRC
+
+* Constants
+LLVM 有几种基本的constant类型。
+
+** Simple Constants
+
+*** Boolean Constants
+true 和 false都是i1类型的合法常数取值。
+
+*** Integer Constants
+标准整数（例如4）是integer type的常数，负数可以和integer types一起使用。
+
+*** Float-pointing constants
+浮点常数使用标准的十进制表示法（例如123.421），指数表示法（例如1.23421e+2）或更精确的十六进制表示法。 汇编器需要浮点常量的精确十进制值。
+例如，汇编程序接受1.25，但拒绝1.3，因为1.3是二进制表示的重复的不精确的。 浮点常量必须具有浮点类型。
+
+*** Null pointer constants
+null标识被识别为空指针常量，并且必须是指针类型。
+
+*** Token constants
+none标识被识别为空token常量，并且必须是token类型。
+
+常数的一种非直观表示法是浮点常数的十六进制形式。例如，格式double 0x432ff973cafa8000等同于（但比其难读）double 4.5e + 15。 唯一需要十六进制浮点常量的场合
+（以及由反汇编程序生成它们的唯一场合）是在必须生成浮点常量但不能将其表示为十进制浮点数的合适数量。例如，NaN，无穷大和其他特殊值均以其IEEE十六进制格式表示，
+因此汇编和反汇编不会造成常量中的任何位改变。
+
+没有x86_mmx类型的常量。
+
+** Complex Constants
+复合常量是简单常量和较小复合常量的（潜在递归）组合。
+
+*** Structure constants
+用类似于结构类型定义的符号表示结构常数（用逗号分隔的成员列表，用大括号（{}）包围）。 例如：“ {i32 4，float 17.0，i32 * @G}”，其中“ @G”被声明为“ @G = external global i32”。
+结构常数必须具有结构类型，并且成员的数量和类型必须与该类型对应的成员匹配。
+
+*** Array constants
+数组常量用类似于数组类型定义的符号表示（用逗号分隔的成员列表，用方括号（[]）包围）。 例如：“ [i32 42，i32 11，i32 74]”。 数组常量必须具有数组类型，并且元素的数量和类型必
+须与该类型指定的匹配。 作为一种特殊情况，字符数组常量也可以使用c前缀表示为双引号字符串。 例如：c“Hello World \ 0A \ 00”。
+
+*** Vector constants
+向量常量用类似于向量类型定义的符号表示（用逗号分隔的元素列表，用小于/大于（<>）包围）。 例如：“ <i32 42，i32 11，i32 74，i32 100>”。 向量常量必须具有向量类型，并且元素的
+数量和类型必须与该类型指定的元素匹配。
+
+*** Zero initialization
+字符串“zeroinitializer”可用于零初始化任何类型，包括标量和aggregate类型。 这通常用于避免打印大的零初始值（例如对于大型数组），并且始终完全等同于使用显式的零初始值。
+
+*** Metadata node
+metadata node是没有类型的常量元组。例如：“！{！0，！{！2，！0}，！“ test”}“。 元数据可以引用常量值，例如：“！{！0，i32 0，i8 * @global，i64（i64）* @function，！“ str”}”。
+与被当作指令流一部分的其他类型常量不同，元数据是提供附加信息（例如调试信息）的地方。
+
+** Global Variable and Function Addresses
+全局变量和函数的地址始终是隐式有效（链接时）常量。当使用全局标识符并且始终具有指针类型时，将明确引用这些常量。例如，以下是合法的LLVM文件：
+#+BEGIN_SRC
+@X = global i32 17
+@Y = global i32 42
+@Z = global [2 x i32*] [ i32* @X, i32* @Y ]
+#+END_SRC
+
+** Undefined Values
+字符串“undef”可在任何需要常量的地方使用，表示该值的用户可能会收到未指定的位模式。 未定义的值可以是任何类型（“ label”或“ void”除外），并且可以在允许使用常量的任何地方使用。
+
+因为undefined values可以取任何值，编译器会基于其中某一种可能的取值来做优化和转换，这种优化和转换在LLVM中是合法的。
+
+** Poison Values
+poison value是错误操作的结果。为了促进推测执行，当提供了非法操作数时，许多指令不会立即调用undefined behavior，而是返回poison value。 字符串“poison”可以在任何需要常量的地方
+使用。
+
+** Well-Defined Values
+给定程序执行的值，如果该值没有undef bit并且在执行中不是poison，该值就是well defined value。 如果aggregate value或vector的成员是well defined，则它自身就是well defined。
+
+一个single value的常数，non-vector 类型是well defined 如果它既不是undef constant也不是poison constant。freeze instruction的结果是well defined无论它的operand是什么。
+
+** Addresses of Basic Blocks
+#+BEGIN_SRC
+blockaddress(@function, %block)
+#+END_SRC
+“blockaddress”常量计算指定函数中指定basic block的地址，并且始终为i8 *类型。取entry block的地址是非法的。
+
+这个值只有在作为indirectbr或者callbr指令的operand，或者和null比较时才有defined behavior。
+
+** DSO Local Equivalent
+#+BEGIN_SRC
+dso_local_equivalent @func
+#+END_SRC
+“dso_local_equivalent”常量表示函数与给定函数在功能上等价，但始终定义在当前链接单元。其结果指针与underlying function具有相同的类型。允许但不要求结果指针与指向函数的指针不同，
+并且结果指针在不同的转换单元中可能具有不同的值。
+
+** Constant Expressions
+常量表达式用于允许将包含其他常量的表达式用作常量。常量表达式可以是任何first class type，并且可以涉及任何没有side effects的LLVM操作（例如不支持load和call）。
+
+以下是常量表达式的语法：
+
+1、trunc (CST to TYPE)
+在常数上执行trunc操作。
+
+2、zext (CST to TYPE)
+在常数上执行zext操作。
+
+3、sext (CST to TYPE)
+在常数上执行sext操作。
+
+4、fptrunc (CST to TYPE)
+将浮点常量截断为另一种浮点类型。 CST的size必须大于TYPE的size。 两种类型都必须是浮点数。
+
+5、fpext (CST to TYPE)
+将浮点数常量扩展为另一种浮点类型。 CST的size必须小于或等于TYPE的size。 两种类型都必须是浮点数。
+
+6、fptoui (CST to TYPE)
+将浮点常量转换为相应的无符号整型常量。TYPE必须是标量或向量整数类型。 CST必须为标量或向量浮点类型。 CST和TYPE都必须是标量，或者成员数量相同的向量。如果该值不适合整数类型，
+则结果为poison value。
+
+7、fptosi (CST to TYPE)
+同6，只是转换为相应的有符号整型常量。
+
+8、uitofp (CST to TYPE)
+将无符号整数常量转换为相应的浮点常量。 TYPE必须是标量或向量浮点类型。CST必须为标量或向量整数类型。 CST和TYPE都必须是标量，或者成员数量相同的向量。
+
+9、sitofp (CST to TYPE)
+同8，但是将有符号整数常量转换成相应的浮点常量。
+
+10、ptrtoint (CST to TYPE)
+在常数上执行ptrtoint操作。
+
+11、inttoptr (CST to TYPE)
+在常数上执行inttoptr操作。
+
+12、bitcast (CST to TYPE)
+将常量CST转换为另一个TYPE。 操作数的约束与bitcast instruction的约束相同。
+
+13、addrspacecast (CST to TYPE)
+将常量指针或指针CST的常量向量转换为其他地址空间中的另一个TYPE。 操作数的约束与addrspacecast指令的约束相同。
+
+14、getelementptr (TY, CSTPTR, IDX0, IDX1, ...), getelementptr inbounds (TY, CSTPTR, IDX0, IDX1, ...)
+
+对常量执行getelementptr操作。 与getelementptr指令一样，索引列表可能包含一个或多个索引。
+
+15、select (COND, VAL1, VAL2)
+对常量执行select操作。
+
+16、icmp COND (VAL1, VAL2)
+对常量执行icmp操作。
+
+17、fcmp COND (VAL1, VAL2)
+对常量执行fcmp操作。
+
+18、extractelement (VAL, IDX)
+对常量执行extractelement操作。
+
+19、insertelement (VAL, ELT, IDX)
+对常量执行insertelement操作。
+
+20、shufflevector (VEC1, VEC2, IDXMASK)
+对常量执行shufflevector操作。
+
+21、extractvalue (VAL, IDX0, IDX1, ...)
+对常量执行extractvalue操作。 索引列表的理解方式与“getelementptr”操作中的索引类似。 必须至少指定一个索引值。
+
+22、insertvalue (VAL, ELT, IDX0, IDX1, ...)
+同21，但是对常量执行insertvalue操作。
+
+23、OPCODE (LHS, RHS)
+执行针对LHS和RHS常数的指定操作。OPCODE可以是任何二进制或按位二进制操作。对操作数的约束与相应指令的约束相同（例如，不允许对浮点值进行按位运算）。
+
+* Other Values
+** Inline Assembler Expressions
+LLVM通过使用特殊值来支持内联汇编程序表达式（与module-level内联汇编相反）。此值将内联汇编程序表示为模板字符串（包含要发出的指令），操作数约束列表（存储为字符串），
+指示内联asm表达式是否有副作用的flag以及指示是否有副作用的flag。包含asm的函数需要保守地对齐其堆栈。
+* Metadata
+LLVM IR允许在程序中将metadata attached to instruction，这样能传递额外的代码信息给optimizer和code generator。metadata的一个典型应用是源码级的debug信息。
+有两种metadata primitives: strings和nodes。
+
+metadata没有类型，也不是一个值，如果被call instruction引用，它将使用metadata type。
+
+所有的metadata以感叹号!开头。
+
+** Metadata Nodes and Metadata Strings
 
 * lazy symbol binding
 Lazy binding is controlled by the -z option to the linker, ld. This option takes keywords as an argument; the keywords include (among others):
