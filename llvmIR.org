@@ -1414,6 +1414,648 @@ metadata没有类型，也不是一个值，如果被call instruction引用，�
 所有的metadata以感叹号!开头。
 
 ** Metadata Nodes and Metadata Strings
+metadata string是用双引号引起来的字符串。通过用“\xx”转义不可打印的字符，它可以包含任何字符，其中“xx”是两位十六进制代码。例如：“!"test \ 00"”。
+
+metadata nodes用类似于结构常数的符号表示（用逗号分隔的成员列表，用大括号括起来，并带有感叹号）。metadata node的操作数可以是任何值。例如：
+#+BEGIN_SRC
+!{ !"test\00", i32 10}
+#+END_SRC
+不是唯一的metadata nodes可以使用distinct关键字标识，例如：
+#+BEGIN_SRC
+!0 = distinct !{!"test\00", i32 10}
+#+END_SRC
+当不会根据节点的内容合并节点时，使用distinct nodes很有用。当metadata operands更改，转换导致唯一性冲突时，也会发生这种情况。
+
+named metadata是metadata nodes的集合，可以在module symbol talbe 中查找。 例如：
+#+BEGIN_SRC
+!foo = !{!4, !3}
+#+END_SRC
+
+metadata可以用作函数参数。下例，llvm.dbg.value 使用三个metadata参数：
+#+BEGIN_SRC
+call void @llvm.dbg.value(metadata !24, metadata !25, metadata !26)
+#+END_SRC
+
+metadata可以附加到指令。 下面，metadata!21使用!dbg标识符附加到add指令：
+#+BEGIN_SRC
+%indvar.next = add i64 %indvar, 1, !dbg !21
+#+END_SRC
+
+metadata也可以附加到函数或全局变量。 下面，元数据!22附加到f1和f2函数，并使用!dbg标识符附加全局变量g1和g2：
+#+BEGIN_SRC
+declare !dbg !22 void @f1()
+define void @f2() !dbg !22 {
+  ret void
+}
+
+@g1 = global i32 0, !dbg !22
+@g2 = external global i32, !dbg !22
+#+END_SRC
+需要进行转换，以删除不知道或无法保留的任何metadata attachment。 当前，!type和!absolute_symbol附加到全局变量的metadata附件是一个例外，除非全局变量本身被删除，
+否则不能无条件删除它们。
+
+除debug metadata（名称为!llvm.dbg.*的metadata）外，使用named metadata附加到module的元数据不得删除。
+
+以下是有关optimizer和code generator识别特定元数据节点的更多信息。
+
+*** Specialized Metadata Nodes
+specialized metadata nodes是metadata中的自定义数据结构（与通用元组相反）。 它们的字段已标记，可以按任何顺序指定。
+
+这些原本不是以调试信息为中心，但是目前所有specialized metadata nodes都与调试信息相关。详细的内容可参看https://llvm.org/docs/LangRef.html#specialized-metadata-nodes
+
+*** ‘tbaa’ Metadata
+在LLVM IR中，memory没有类型，因此LLVM自己的类型系统不适合进行基于类型的别名分析（TBAA）。而是将metadata添加到IR中，以描述高级语言的类型系统。这可以用于实现C/C++严格类型
+别名规则，也可以用于实现其他语言的自定义别名分析。
+
+LLVM的TBAA系统的描述分为两个部分：1、semantics讨论高级问题;2、representation讨论各种实体的metadata编码。
+
+始终可以将任何TBAA节点跟踪到“根” TBAA节点。具有不同根的TBAA节点具有未知的别名关系，LLVM保守地推断它们之间的MayAlias。 本节中提到的规则仅适用于位于在同一根目录下的TBAA节点。
+
+**** semantics
+
+**** representation
+
+*** ‘tbaa.struct’ Metadata
+llvm.memcpy通常用于实现类似于C或类似语言中的aggregate赋值操作，但是它被定义为复制memory的连续区域，这对于由于填充而包含空隙的aggregate类型是非必要的。此外，它不包含有关
+aggregate字段的任何TBAA信息。
+
+!tbaa.struct元数据可以描述memcpy中的哪些memory子区域正在填充以及该结构的TBAA标签是什么。
+
+!tbaa.struct metadata nodes是三个一组的操作数列表。第一个操作数以字节为单位给出字段的字节偏移量，第二个操作数以字节为单位给出其size，第三个操作数给出其tbaa标签。 例如：
+#+BEGIN_SRC
+!4 = !{ i64 0, i64 4, !1, i64 8, i64 4, !2 }
+#+END_SRC
+这描述了具有两个字段的结构。第一个偏移量为0字节，大小为4字节，tbaa标签为!1。 第二个偏移量为8个字节，大小为4个字节，tbaa标签为!2。
+
+这些字段不必是连续的。在此示例中，两个字段之间有4字节的间隙。 该间隙表示填充，填充不携带有用的数据，不需要保留。
+
+*** ‘noalias’ and ‘alias.scope’ Metadata
+
+* Intrinsic Global Variables
+LLVM具有许多magic全局变量，这些变量包含影响代码生成或其他IR语义的数据。此类的所有全局变量都有一部分被指定为llvm.metadata。本节以及所有以llvm开头的全局变量是LLVM保留字段。
+
+** llvm.used
+llvm.used全局变量是一个有appending linkage的数组，该数组包含指向named全局变量，函数和别名的指针列表，这些指针可以有包含由bitcast或getelementptr形成的指针。
+
+例子：
+#+BEGIN_SRC
+@X = global i8 4
+@Y = global i32 123
+
+@llvm.used = appending global [2 x i8*] [
+   i8* @X,
+   i8* bitcast (i32* @Y to i8*)
+], section "llvm.metadata"
+#+END_SRC
+
+** llvm.compiler.used
+llvm.compiler.used与llvm.used相同，只不过它防止编译器接触该符号。此结构很少被用到，不应出现在souce中。
+
+** llvm.global_ctors
+#+BEGIN_SRC
+%0 = type { i32, void ()*, i8* }
+@llvm.global_ctors = appending global [1 x %0] [%0 { i32 65535, void ()* @ctor, i8* @data }]
+#+END_SRC
+llvm.global_ctors数组包含构造函数，优先级以及关联的全局变量或函数。加载模块时，将按优先级的升序（由低到高）调用此数组引用的函数。 没有定义具有相同优先级的函数。
+
+如果第三个字段为非null，并且指向全局变量或函数，则只有在不丢弃当前模块中的关联数据的情况下，初始化函数才会运行。
+
+** llvm.global_dtors
+#+BEGIN_SRC
+%0 = type { i32, void ()*, i8* }
+@llvm.global_dtors = appending global [1 x %0] [%0 { i32 65535, void ()* @dtor, i8* @data }]
+#+END_SRC
+llvm.global_dtors数组包含析构函数，优先级以及关联的全局变量或函数。 卸载模块时，将按优先级从高到低的顺序调用此数组引用的函数。 没有定义具有相同优先级的函数的顺序。
+
+如果第三个字段为非null，并且指向全局变量或函数，则只有在不丢弃当前模块中的关联数据的情况下，析构函数才会运行。
+
+* Instruction Reference
+LLVM 的指令包含：terminator instructions，binary instruction，bitwise binary instruction，memory instructions，other instruction。
+
+** terminator instruction
+每个basic block以terminator instruction为结尾，terminator instruction指明当前block执行完成后接下来应该执行哪个block。terminator instruction生成一个void value，它们
+产生control flow，而不是valuess（invoke指令除外）。
+
+*** ret
+语法：
+#+BEGIN_SRC
+ret <type> <value>       ; Return a value from a non-void function
+ret void                 ; Return from void function
+#+END_SRC
+ret指令用于将控制流（以及可选的值）从函数返回给调用者。
+
+ret指令有两种形式：一种返回值，然后产生控制流，另一种仅产生控制流。
+
+ret指令可以选择接受一个参数，即返回值。 返回值的类型必须是first class类型。
+
+当执行ret指令时，控制流返回到调用函数的context。如果caller是call指令，则在call之后的指令处继续执行。如果caller是invoke指令，则在正常目标块的开头继续执行。如果指令返回一个值，
+则该值将设置call或invoke指令的返回值。
+
+例子：
+#+BEGIN_SRC
+ret i32 5                       ; Return an integer value of 5
+ret void                        ; Return from a void function
+ret { i32, i8 } { i32 4, i8 2 } ; Return a struct of values 4 and 2
+#+END_SRC
+
+*** br
+语法：
+#+BEGIN_SRC
+br i1 <cond>, label <iftrue>, label <iffalse>
+br label <dest>          ; Unconditional branch
+#+END_SRC
+br指令用于使控制流转移到当前function中的另一个basic block。 该指令有两种形式，分别对应于条件分支和无条件分支。
+
+br指令的条件分支形式采用一个i1值和两个label值。br指令的无条件形式将单个label值作为目标。
+
+执行有条件的br指令时，将评估i1参数。如果该值为true，则控制转到iftrue标签。 如果cond为false，则控制流向iffalse标签。如果cond是poison或undef，则该指令导致undefined behavior。
+
+例子：
+#+BEGIN_SRC
+Test:
+  %cond = icmp eq i32 %a, %b
+  br i1 %cond, label %IfEqual, label %IfUnequal
+IfEqual:
+  ret i32 1
+IfUnequal:
+  ret i32 0
+#+END_SRC
+
+*** switch
+语法：
+#+BEGIN_SRC
+switch <intty> <value>, label <defaultdest> [ <intty> <val>, label <dest> ... ]
+#+END_SRC
+switch指令用于将控制流转移到几个不同的位置之一。它是对br指令的推广，它允许控制流到达多个分支。
+
+switch指令使用三个参数：一个整型比较值value，默认的label取值，以及一组比较值常量和label对。该表不允许包含重复的常量条目。
+
+switch指令指定value和destination的表。当执行switch指令时，将在该表中搜索给定值。 如果找到该值，则控制流转移到相应的目的地；否则，控制流将转移到默认目标。
+如果value是poison或undef，则此指令具有未定义的行为。
+
+例子：
+#+BEGIN_SRC
+; Emulate a conditional br instruction
+%Val = zext i1 %value to i32
+switch i32 %Val, label %truedest [ i32 0, label %falsedest ]
+
+; Emulate an unconditional br instruction
+switch i32 0, label %dest [ ]
+
+; Implement a jump table:
+switch i32 %val, label %otherwise [ i32 0, label %onzero
+                                    i32 1, label %onone
+                                    i32 2, label %ontwo ]
+#+END_SRC
+
+*** indirectbr
+语法：
+#+BEGIN_SRC
+indirectbr <somety>* <address>, [ label <dest1>, label <dest2>, ... ]
+#+END_SRC
+indirectbr指令在当前函数中实现了label的间接分支，该label的地址由address指定。地址必须从blockaddress常量派生。
+
+地址参数是要跳转到的label的地址。 其余参数表示地址可能指向的完整可能目的地的集合。 blocks允许多次出现在destination list中。
+
+例子：
+#+BEGIN_SRC
+indirectbr i8* %Addr, [ label %bb1, label %bb2, label %bb3 ]
+#+END_SRC
+
+*** invoke
+语法：
+#+BEGIN_SRC
+<result> = invoke [cconv] [ret attrs] [addrspace(<num>)] <ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
+              [operand bundles] to label <normal label> unwind label <exception label>
+#+END_SRC
+invoke指令使控制权转移到指定的function，控制流可能转移到normal label或exception label。如果callee 以ret指令返回，则控制流将返回normal label。如果callee（或任何间接callee）
+通过resume指令或其他异常处理机制返回，则控制被中断并动态地在最近的exception label 处继续。
+
+exception label是该exception的landing pad。因此，exception label必须有landingpad指令，该指令包含有关程序unwinding的行为的信息，作为它的第一条非PHI指令。
+
+landing pad大致对应于在try/catch序列的catch部分中找到的代码。
+
+这个指令需要如下一些参数：
+
+1、可选的cconv参数表明使用哪种calling convention，没有指定则默认使用C calling convention。
+
+2、可选的ret attrs表示返回值的属性，这里只有zeroext，signext，inreg属性可选。
+
+3、可选的addrspace表示callee的address space。没有指定，则将使用datalayout string中的address space。
+
+4、ty是call instruction自身的类型，同时也是返回值的类型，函数没有返回值则置为void。
+
+5、fnty是被调函数的signature。参数类型必须和signature所暗含的类型相匹配。如果该函数不是可变长度参数，则此类型可以省略。
+
+6、fnptrval:包含指针的llvm value，这个指针指向将要被调用的函数。
+
+7、function args：类型与函数签名参数类型和参数属性匹配的参数列表。 所有参数必须是first class的类型。如果函数签名指示函数接受可变数量的参数，则可以指定额外的参数。
+
+8、normal label:当被调用的函数执行ret指令后，会执行的label。
+
+9、exception label:当callee以resume指令或其它异常处理机制返回后，会执行的label。
+
+10、可选的函数属性列表。
+
+11、可选的operand bundles列表。
+
+在大多数情况下，此指令均旨在执行标准的call调用。主要区别在于它与label建立了关联，runtime library可以使用该label来unwind stack（主要用于异常处理）。
+
+该指令在具有析构函数的语言中使用，以确保在longjmp或抛出异常的情况下执行正确的清除。 此外，这对于以支持它们的高级语言来实现catch子句也很重要。
+
+例子：
+#+BEGIN_SRC
+%retval = invoke i32 @Test(i32 15) to label %Continue
+            unwind label %TestCleanup              ; i32:retval set
+%retval = invoke coldcc i32 %Testfnptr(i32 15) to label %Continue
+            unwind label %TestCleanup              ; i32:retval set
+#+END_SRC
+
+*** callbr
+语法：
+#+BEGIN_SRC
+<result> = callbr [cconv] [ret attrs] [addrspace(<num>)] <ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
+              [operand bundles] to label <fallthrough label> [indirect labels]
+#+END_SRC
+callbr指令使控制权转移到指定的function，并且可能将控制流转移到fallthrough标签或indirect标签之一。
+
+该指令仅应用于实现gcc样式内联汇编的goto功能。其他任何用法都会导致IR verifier的错误。
+
+这个指令需要如下一些参数：
+
+1、可选的cconv参数表明使用哪种calling convention，没有指定则默认使用C calling convention。
+
+2、可选的ret attrs表示返回值的属性，这里只有zeroext，signext，inreg属性可选。
+
+3、可选的addrspace表示callee的address space。没有指定，则将使用datalayout string中的address space。
+
+4、ty是call instruction自身的类型，同时也是返回值的类型，函数没有返回值则置为void。
+
+5、fnty是被调函数的signature。参数类型必须和signature所暗含的类型相匹配。如果该函数不是可变长度参数，则此类型可以省略。
+
+6、fnptrval:包含指针的llvm value，这个指针指向将要被调用的函数。
+
+7、function args：类型与函数签名参数类型和参数属性匹配的参数列表。 所有参数必须是first class的类型。如果函数签名指示函数接受可变数量的参数，则可以指定额外的参数。
+
+8、fallthrough label：内联汇编结束在底部结束后会执行的label。
+
+9、indirect labels：callee将控制权转移到fallthrough label以外的位置时到达的label。这些blockaddress常数也应该在function args列表中。
+
+10、可选的函数属性列表。
+
+11、可选的operand bundles里表。
+
+在大多数情况下，此指令均旨在执行标准的call 调用。主要区别在于它与其他label建立了关联，以定义控制流在调用之后的位置。
+
+callbr指令的输出值仅可用于fallthrough block，而不适用于任何indirect block。
+
+此功能的唯一用途是实现gcc内联汇编的goto功能，其中可以提供其他标签作为内联汇编跳转到的位置。
+
+例子：
+#+BEGIN_SRC
+; "asm goto" without output constraints.
+callbr void asm "", "r,X"(i32 %x, i8 *blockaddress(@foo, %indirect))
+            to label %fallthrough [label %indirect]
+
+; "asm goto" with output constraints.
+<result> = callbr i32 asm "", "=r,r,X"(i32 %x, i8 *blockaddress(@foo, %indirect))
+            to label %fallthrough [label %indirect]
+#+END_SRC
+
+*** resume
+语法：
+#+BEGIN_SRC
+resume <type> <value>
+#+END_SRC
+resume指令是没有后续指令的终止指令。
+
+resume指令需要一个参数，该参数必须与同一function中任何landingpad指令的结果具有相同的类型。
+
+resume指令可恢复现有（运行中）异常的传递，该异常的展开已被landingpad指令中断。
+
+例子：
+#+BEGIN_SRC
+resume { i8*, i32 } %exn
+#+END_SRC
+
+*** catchswitch
+语法：
+#+BEGIN_SRC
+<resultval> = catchswitch within <parent> [ label <handler1>, label <handler2>, ... ] unwind to caller
+<resultval> = catchswitch within <parent> [ label <handler1>, label <handler2>, ... ] unwind label <default>
+#+END_SRC
+LLVM的异常处理系统使用catchswitch指令来描述由EH personality 函数执行的可能的catch handlers。
+
+parent参数是包含catchswitch指令的funclet的token。如果catchswitch不在funclet内，则此操作数可以是token none。
+
+default参数是以cleanuppad或catchswitch指令开头的另一个basic block的label。此unwind destination必须是相对于parent links的合法目标。
+
+处理程序是后继程序块的非空列表，每个后继程序块以catchpad指令开头。
+
+执行此指令将控制权转移到处理程序中的后继者之一，或者继续通过unwind label（如果存在）进行unwind。
+
+catchswitch既是terminator指令又是pad指令，这意味着它既是基本块中的第一条非phi指令，也必须是最后一条指令。 因此，它必须是该块中唯一的非phi指令。
+
+例子：
+#+BEGIN_SRC
+dispatch1:
+  %cs1 = catchswitch within none [label %handler0, label %handler1] unwind to caller
+dispatch2:
+  %cs2 = catchswitch within %parenthandler [label %handler0] unwind label %cleanup
+#+END_SRC
+
+*** catchret
+语法：
+#+BEGIN_SRC
+catchret from <token> to label <normal>
+#+END_SRC
+catchret指令只有一个后继指令。
+
+catchret的第一个参数表示它退出哪个catchpad。它必须是一个catchpad。 catchret的第二个参数指定控制权将从何处转移到下一个。
+
+catchret指令结束了一个现有的（运行中）异常，该异常的展开已被catchpad指令中断。personality function有机会执行任意代码，例如销毁active exception。然后控制权转移到正常状态。
+
+token参数必须是catchpad指令产生的token。
+
+例子：
+#+BEGIN_SRC
+catchret from %catch label %continue
+#+END_SRC
+
+*** cleanupret
+语法：
+#+BEGIN_SRC
+cleanupret from <value> unwind label <continue>
+cleanupret from <value> unwind to caller
+#+END_SRC
+cleanupret 具有可选的后继指令
+
+cleanupret指令需要一个参数，该参数指示其退出哪个cleanuppad，并且必须是cleanuppad。
+
+cleanupret指令还有一个可选的后继程序，continue，它必须是另一个以cleanuppad或catchswitch指令开头的基本块的label。
+
+cleanupret指令向personality function指示其转移了控制权的一个cleanuppad已结束。 它转移控制权以继续或退出该function。
+
+例子：
+#+BEGIN_SRC
+cleanupret from %cleanup unwind to caller
+cleanupret from %cleanup unwind label %continue
+#+END_SRC
+
+*** unreachable
+语法：
+#+BEGIN_SRC
+unreachable
+#+END_SRC
+“无法到达”指令没有定义好的语义。该指令用于通知optimizer，代码的特定部分不可访问。
+
+** Unary Operations
+一元运算符需要一个操作数，对其执行一个操作，并产生一个值。 操作数可能表示多个数据，向量数据类型就是这种情况。 结果值与其操作数具有相同的类型。
+
+*** fneg
+语法：
+#+BEGIN_SRC
+<result> = fneg [fast-math flags]* <ty> <op1>   ; yields ty:result
+#+END_SRC
+fneg指令对操作数取反。
+
+fneg的参数必须是浮点或浮点向量型。
+
+产生的值是操作数的副本，其符号位被翻转。该指令还可以采用任意数量的fast-math flags，这些flags是用于进行不安全的浮点优化的优化hints。
+
+例子：
+#+BEGIN_SRC
+<result> = fneg float %val          ; yields float:result = -%var
+#+END_SRC
+
+** Binary Operations
+二元运算符用于执行程序中的大多数计算。它们需要两个相同类型的操作数，对它们执行一个操作，产生一个值。与向量数据类型一样，操作数可能表示多个数据。结果值与其操作数具有相同
+的类型。
+
+*** add
+语法：
+#+BEGIN_SRC
+<result> = add <ty> <op1>, <op2>          ; yields ty:result
+<result> = add nuw <ty> <op1>, <op2>      ; yields ty:result
+<result> = add nsw <ty> <op1>, <op2>      ; yields ty:result
+<result> = add nuw nsw <ty> <op1>, <op2>  ; yields ty:result
+#+END_SRC
+add指令返回两个操作数的和。
+
+两个参数必须是整数或整数向量，两个参数必须有相同的类型。
+
+如果总和产生无符号溢出，则返回的结果是对2^n求模的结果，其中n是结果的位宽。
+
+由于LLVM整数使用二进制补码表示，因此该指令适用于有符号和无符号整数。
+
+nuw和nsw分别代表“no unsigned wrap”和“no signed wrap”。 如果存在nuw和/或nsw关键字，那么如果分别发生无符号和/或有符号的溢出，则加法的结果值为poison value。
+
+例子：
+#+BEGIN_SRC
+<result> = add i32 4, %var          ; yields i32:result = 4 + %var
+#+END_SRC
+
+*** fadd
+语法：
+#+BEGIN_SRC
+<result> = fadd [fast-math flags]* <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+fadd指令返回两个操作数的和。
+
+两个参数必须是浮点型或浮点型向量，两个参数必须有相同的类型。
+
+假定该指令在默认floating-point environment中执行。 该指令还可以采用任意数量的快速运算符标志，这些标志是用于进行不安全的浮点优化。
+
+例子：
+#+BEGIN_SRC
+result> = fadd float 4.0, %var          ; yields float:result = 4.0 + %var
+#+END_SRC
+
+*** sub
+语法：
+#+BEGIN_SRC
+<result> = sub <ty> <op1>, <op2>          ; yields ty:result
+<result> = sub nuw <ty> <op1>, <op2>      ; yields ty:result
+<result> = sub nsw <ty> <op1>, <op2>      ; yields ty:result
+<result> = sub nuw nsw <ty> <op1>, <op2>  ; yields ty:result
+#+END_SRC
+sub指令表示两个操作数的差。
+
+两个参数必须是整数或整数向量，两个参数必须有相同的类型。
+
+如果差值产生无符号溢出，则返回的结果是对2^n求模的结果，其中n是结果的位宽。
+
+由于LLVM整数使用二进制补码表示，因此该指令适用于有符号和无符号整数。
+
+nuw和nsw分别代表“no unsigned wrap”和“no signed wrap”。 如果存在nuw和/或nsw关键字，那么如果分别发生无符号和/或有符号的溢出，则加法的结果值为poison value。
+
+例子：
+#+BEGIN_SRC
+<result> = sub i32 4, %var          ; yields i32:result = 4 - %var
+<result> = sub i32 0, %val          ; yields i32:result = -%var
+#+END_SRC
+
+*** fsub
+语法：
+#+BEGIN_SRC
+<result> = fsub [fast-math flags]* <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+fadd指令返回两个操作数的差。
+
+两个参数必须是浮点型或浮点型向量，两个参数必须有相同的类型。
+
+假定该指令在默认floating-point environment中执行。 该指令还可以采用任意数量的快速运算符标志，这些标志是用于进行不安全的浮点优化。
+
+例子：
+#+BEGIN_SRC
+<result> = fsub float 4.0, %var           ; yields float:result = 4.0 - %var
+<result> = fsub float -0.0, %val          ; yields float:result = -%var
+#+END_SRC
+
+*** mul
+语法：
+#+BEGIN_SRC
+<result> = mul <ty> <op1>, <op2>          ; yields ty:result
+<result> = mul nuw <ty> <op1>, <op2>      ; yields ty:result
+<result> = mul nsw <ty> <op1>, <op2>      ; yields ty:result
+<result> = mul nuw nsw <ty> <op1>, <op2>  ; yields ty:result
+#+END_SRC
+mul指令返回两个操作数的乘积。
+
+两个参数必须是整数或整数向量，两个参数必须有相同的类型。
+
+如果乘积产生无符号溢出，则返回的结果是对2^n求模的结果，其中n是结果的位宽。
+
+nuw和nsw分别代表“no unsigned wrap”和“no signed wrap”。 如果存在nuw和/或nsw关键字，那么如果分别发生无符号和/或有符号的溢出，则加法的结果值为poison value。
+
+例子：
+#+BEGIN_SRC
+<result> = mul i32 4, %var          ; yields i32:result = 4 * %var
+#+END_SRC
+
+*** fmul
+语法：
+#+BEGIN_SRC
+<result> = fmul [fast-math flags]* <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+fmul指令返回两个操作数的乘积。
+
+两个参数必须是浮点型或浮点型向量，两个参数必须有相同的类型。
+
+假定该指令在默认floating-point environment中执行。 该指令还可以采用任意数量的快速运算符标志，这些标志是用于进行不安全的浮点优化。
+
+例子：
+#+BEGIN_SRC
+<result> = fmul float 4.0, %var          ; yields float:result = 4.0 * %var
+#+END_SRC
+
+*** udiv
+语法：
+#+BEGIN_SRC
+<result> = udiv <ty> <op1>, <op2>         ; yields ty:result
+<result> = udiv exact <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+udiv指令返回两个操作数的无符号整数商。
+
+两个参数必须是整数或整数向量，两个参数必须有相同的类型。
+
+无符号整数除法和有符号整数除法是不同的操作。对于有符号整数除法，使用sdiv。
+
+除以零是未定义的行为。 对于向量，如果除数的任何元素为零，则该操作是未定义的行为。
+
+如果存在exact关键字，则如果％op1不是％op2的倍数，则udiv的结果值将是poison。
+
+例子：
+#+BEGIN_SRC
+<result> = udiv i32 4, %var          ; yields i32:result = 4 / %var
+#+END_SRC
+
+*** sdiv
+语法：
+#+BEGIN_SRC
+<result> = sdiv <ty> <op1>, <op2>         ; yields ty:result
+<result> = sdiv exact <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+产生的值是两个操作数的有符号整数商，向0舍入。
+
+除以零是未定义的行为。对于向量，如果除数的任何元素为零，则该操作具有未定义的行为。溢出还会导致未定义的行为。
+
+如果出现exact关键字，结果存在舍入，则sdiv的结果值为poison value。
+
+例子：
+#+BEGIN_SRC
+<result> = sdiv i32 4, %var          ; yields i32:result = 4 / %var
+#+END_SRC
+
+*** fdiv
+语法：
+#+BEGIN_SRC
+<result> = fdiv [fast-math flags]* <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+fdiv指令返回两个操作数的商。
+
+两个参数必须是浮点型或浮点型向量，两个参数必须有相同的类型。
+
+假定该指令在默认floating-point environment中执行。 该指令还可以采用任意数量的快速运算符标志，这些标志是用于进行不安全的浮点优化。
+
+例子：
+#+BEGIN_SRC
+<result> = fdiv float 4.0, %var          ; yields float:result = 4.0 / %var
+#+END_SRC
+
+*** urem
+语法：
+#+BEGIN_SRC
+<result> = urem <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+urem指令返回两个操作数无符号除法的余数。
+
+两个参数必须是整型或整型向量，两个参数必须有相同的类型。
+
+除以零求余是未定义的行为。对于向量，如果除数的任何元素为零，则该操作具有未定义的行为
+
+例子：
+#+BEGIN_SRC
+<result> = urem i32 4, %var          ; yields i32:result = 4 % %var
+#+END_SRC
+
+*** srem
+语法：
+#+BEGIN_SRC
+<result> = srem <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+srem指令返回其两个操作数的有符号除法的余数。
+
+srem指令的两个参数必须是整数或整数值的向量。两个参数必须具有相同的类型。
+
+结果为零或与被除数op1具有相同的符号，（模运算符结果为零或与除数op2具有相同的符号）。
+
+除以零求余是未定义的行为。对于向量，如果除数的任何元素为零，则该操作具有未定义的行为。溢出还会导致未定义的行为。
+
+例子：
+#+BEGIN_SRC
+<result> = srem i32 4, %var          ; yields i32:result = 4 % %var
+#+END_SRC
+
+*** frem
+语法：
+#+BEGIN_SRC
+<result> = frem [fast-math flags]* <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+frem指令返回两个操作数相除的余数。
+
+两个参数必须是浮点型或浮点型向量，两个参数必须有相同的类型。
+
+这与libm'fmod'函数的输出相同，但是没有设置errno的可能性。 余数同被除数有相同的符号。假定该指令在默认floating-point environment中执行。
+该指令还可以采用任意数量的快速运算符标志，这些标志是用于进行不安全的浮点优化。
+
+例子：
+#+BEGIN_SRC
+<result> = frem float 4.0, %var          ; yields float:result = 4.0 % %var
+#+END_SRC
+
+** Bitwise Binary Operations
+
 
 * lazy symbol binding
 Lazy binding is controlled by the -z option to the linker, ld. This option takes keywords as an argument; the keywords include (among others):
