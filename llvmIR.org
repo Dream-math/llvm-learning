@@ -2055,6 +2055,134 @@ frem指令返回两个操作数相除的余数。
 #+END_SRC
 
 ** Bitwise Binary Operations
+按位二元运算符用于在程序中进行各种位翻转操作。 它们需要两个相同类型的操作数，对其执行一个操作，并产生一个值。 结果值与其操作数的类型相同。
+
+*** shl
+语法：
+#+BEGIN_SRC
+<result> = shl <ty> <op1>, <op2>           ; yields ty:result
+<result> = shl nuw <ty> <op1>, <op2>       ; yields ty:result
+<result> = shl nsw <ty> <op1>, <op2>       ; yields ty:result
+<result> = shl nuw nsw <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+shl指令将操作数左移指定位数。
+
+shl指令的两个参数必须同时是整型或者整型向量，op2被视作无符号值。
+
+产生的值是op1 * 2^op2 mod 2^n，其中n是结果的宽度。 如果op2（静态或动态）等于或大于op1中的位数，则该指令返回poison value。 如果参数是向量，则op1的每个向量元素都将偏移op2中的相应偏移量。
+
+如果存在nuw关键字，若移位会移出任何非零位，则产生poison value。 如果存在nsw关键字，若该移位将移出与结果符号位不同的所有位，则产生poison value。
+
+例子：
+#+BEGIN_SRC
+<result> = shl i32 4, %var   ; yields i32: 4 << %var
+<result> = shl i32 4, 2      ; yields i32: 16
+<result> = shl i32 1, 10     ; yields i32: 1024
+<result> = shl i32 1, 32     ; undefined
+<result> = shl <2 x i32> < i32 1, i32 1>, < i32 1, i32 2>   ; yields: result=<2 x i32> < i32 2, i32 4>
+#+END_SRC
+
+*** lshr
+语法：
+#+BEGIN_SRC
+<result> = lshr <ty> <op1>, <op2>         ; yields ty:result
+<result> = lshr exact <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+lshr指令（向右逻辑移位）将操作数向右移指定位数，用0填充。
+
+两个参数必须同时是整型或者整型向量，op2被视作无符号值。
+
+如果出现exact关键字，则如果移出的任何位都不为零，则lshr的结果值为poison value。
+
+例子：
+#+BEGIN_SRC
+<result> = lshr i32 4, 1   ; yields i32:result = 2
+<result> = lshr i32 4, 2   ; yields i32:result = 1
+<result> = lshr i8  4, 3   ; yields i8:result = 0
+<result> = lshr i8 -2, 1   ; yields i8:result = 0x7F
+<result> = lshr i32 1, 32  ; undefined
+<result> = lshr <2 x i32> < i32 -2, i32 4>, < i32 1, i32 2>   ; yields: result=<2 x i32> < i32 0x7FFFFFFF, i32 1>
+#+END_SRC
+
+*** ashr
+语法：
+#+BEGIN_SRC
+<result> = ashr <ty> <op1>, <op2>         ; yields ty:result
+<result> = ashr exact <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+ashr指令（算术右移）将操作数向右移了指定位数，用符号位填充。
+
+两个参数必须同时是整型或者整型向量，op2被视作无符号值。
+
+如果出现exact关键字，则如果移出的任何位都不为零，则lshr的结果值为poison value。
+
+例子：
+#+BEGIN_SRC
+<result> = ashr i32 4, 1   ; yields i32:result = 2
+<result> = ashr i32 4, 2   ; yields i32:result = 1
+<result> = ashr i8  4, 3   ; yields i8:result = 0
+<result> = ashr i8 -2, 1   ; yields i8:result = -1
+<result> = ashr i32 1, 32  ; undefined
+<result> = ashr <2 x i32> < i32 -2, i32 4>, < i32 1, i32 3>   ; yields: result=<2 x i32> < i32 -1, i32 0>
+#+END_SRC
+
+*** and
+语法：
+#+BEGIN_SRC
+<result> = and <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+
+and指令对两个操作数执行按位逻辑与操作。
+
+两个操作数必须同时为整型或整型向量，两个向量必须有相同的类型。
+
+*** or
+语法
+#+BEGIN_SRC
+<result> = or <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+or指令对两个操作数执行按位逻辑或操作。
+
+两个操作数必须同时为整型或整型向量，两个向量必须有相同的类型。
+
+*** xor
+语法：
+#+BEGIN_SRC
+<result> = xor <ty> <op1>, <op2>   ; yields ty:result
+#+END_SRC
+xor指令对两个操作数执行按位异或操作，它被用来实现补码操作。
+
+两个操作数必须同时为整型或整型向量，两个向量必须有相同的类型。
+
+** Vector Operations
+LLVM支持几种指令，以独立于target的方式进行向量运算。这些指令涵盖了有效处理向量所需的成员访问和向量特定操作。
+
+*** extractelement
+语法：
+#+BEGIN_SRC
+<result> = extractelement <n x <ty>> <val>, <ty2> <idx>  ; yields <ty>
+<result> = extractelement <vscale x n x <ty>> <val>, <ty2> <idx> ; yields <ty>
+#+END_SRC
+extractelement指令根据index从向量中提取单个标量元素。
+
+第一个参数是一个向量值，第二个参数表示index，index可以是任何整型变量。
+
+result是和val相同类型的标量，如果idx超过向量的长度，则result是一个poison值。对于可扩展向量，如果idx超过向量的运行时长度，则result是一个poison值。
+
+例子：
+#+BEGIN_SRC
+<result> = extractelement <4 x i32> %vec, i32 0    ; yields i32
+#+END_SRC
+
+*** insertelement
+语法：
+#+BEGIN_SRC
+<result> = insertelement <n x <ty>> <val>, <ty> <elt>, <ty2> <idx>    ; yields <n x <ty>>
+<result> = insertelement <vscale x n x <ty>> <val>, <ty> <elt>, <ty2> <idx> ; yields <vscale x n x <ty>>
+#+END_SRC
+insertelement在给定idx处插入一个标量到向量中。
+
+第一个参数是一个向量值，第二个参数是要插入的标量值，它的类型必须和向量的成员类型相同，第三个操作数是index，表示标量要插入的位置。
 
 
 * lazy symbol binding
@@ -2103,10 +2231,3 @@ poison is a special value that represents a violation of an assumption。
 undef of type T is the set consisting of all defined values of T。
 * tail call
 函数在code block的结尾被调用，即为tail call。
-
-* store 指令
-store指令用于写memory。
-* load指令
-load指令用于读memory.
-* sub指令
-sub返回两个操作数的差值
