@@ -2184,7 +2184,130 @@ insertelement在给定idx处插入一个标量到向量中。
 
 第一个参数是一个向量值，第二个参数是要插入的标量值，它的类型必须和向量的成员类型相同，第三个操作数是index，表示标量要插入的位置。
 
+结果是与val相同类型的向量。它的元素值是val的那些元素值，除了在idx位置，它的值是elt。 如果idx超过固定长度向量val长度，则结果是poison value。对于scalable向量，如果idx的值
+超过向量的运行时长度，则结果为poison value。
 
+例子：
+#+BEGIN_SRC
+<result> = insertelement <4 x i32> %vec, i32 1, i32 0    ; yields <4 x i32>
+#+END_SRC
+
+*** shufflevector
+语法：
+#+BEGIN_SRC
+<result> = shufflevector <n x <ty>> <v1>, <n x <ty>> <v2>, <m x i32> <mask>    ; yields <m x <ty>>
+<result> = shufflevector <vscale x n x <ty>> <v1>, <vscale x n x <ty>> v2, <vscale x m x i32> <mask>  ; yields <vscale x m x <ty>>
+#+END_SRC
+shufflevector指令从两个输入向量构造元素的排列，返回一个向量，该向量具有与输入相同的元素类型，且长度与shuffle mask相同。
+
+shufflevector指令前两个参数是两个相同类型的向量，第三个参数是成员类型为i32的shuffle mask向量。shuffle mask 向量的成员必须是常数整数或者undef值。
+
+例子：
+#+BEGIN_SRC
+<result> = shufflevector <4 x i32> %v1, <4 x i32> %v2,
+                        <4 x i32> <i32 0, i32 4, i32 1, i32 5>  ; yields <4 x i32>
+<result> = shufflevector <4 x i32> %v1, <4 x i32> undef,
+                        <4 x i32> <i32 0, i32 1, i32 2, i32 3>  ; yields <4 x i32> - Identity shuffle.
+<result> = shufflevector <8 x i32> %v1, <8 x i32> undef,
+                        <4 x i32> <i32 0, i32 1, i32 2, i32 3>  ; yields <4 x i32>
+<result> = shufflevector <4 x i32> %v1, <4 x i32> %v2,
+                        <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7 >  ; yields <8 x i32>
+#+END_SRC
+
+** Aggregate Operations
+
+*** extractvalue
+语法：
+#+BEGIN_SRC
+<result> = extractvalue <aggregate type> <val>, <idx>{, <idx>}*
+#+END_SRC
+extractvalue指令从aggregate值中提取成员字段的值。
+
+extractvalue指令的第一个操作数是struct或数组类型的值。其他操作数是常量索引，用于指定要提取的值，这个方式类似于getelementptr指令中的索引。
+
+它和getelementptr索引的主要区别：由于要索引的值不是指针，因此将省略第一个索引并将其假定为零；必须至少指定一个索引；不仅struct索引而且数组索引都必须在范围内。
+
+例子：
+#+BEGIN_SRC
+<result> = extractvalue {i32, float} %agg, 0    ; yields i32
+#+END_SRC
+
+*** insertvalue
+语法：
+#+BEGIN_SRC
+<result> = insertvalue <aggregate type> <val>, <ty> <elt>, <idx>{, <idx>}*    ; yields <aggregate type>
+#+END_SRC
+insertvalue指令将一个值插入到aggregate value的成员字段中。
+
+insertvalue指令的第一个操作数是结构或数组类型的值。 第二个操作数是要插入的first class值。接下来的操作数是常量索引，用于指示要插入值的位置，其位置类似于extractvalue
+指令中的索引。 要插入的值必须与索引所标识的值具有相同的类型。
+
+例子：
+#+BEGIN_SRC
+%agg1 = insertvalue {i32, float} undef, i32 1, 0              ; yields {i32 1, float undef}
+%agg2 = insertvalue {i32, float} %agg1, float %val, 1         ; yields {i32 1, float %val}
+%agg3 = insertvalue {i32, {float}} undef, float %val, 1, 0    ; yields {i32 undef, {float %val}}
+#+END_SRC
+
+** Memory Access and Addressing Operations
+
+*** alloca
+语法：
+#+BEGIN_SRC
+<result> = alloca [inalloca] <type> [, <ty> <NumElements>] [, align <alignment>] [, addrspace(<num>)]     ; yields type addrspace(num)*:result
+#+END_SRC
+alloca指令在当前执行的函数的堆栈帧上分配内存，当该函数返回其调用者时将自动释放该内存。始终在地址空间中为datalayout中指示的对象分配资源。
+
+alloca指令在运行时堆栈上分配sizeof（<type>*NumElements个字节的内存，并向程序返回适当类型的指针。如果给定NumElements的值，则它为分配的元素数，否则NumElements默认为1。
+如果指定了alignment，则分配的值结果至少与该边界对齐。alignment不得大于1 <<29。如果未指定，或者为零，则target可以选择与该类型兼容的对齐方式对齐。
+
+分配的内存是未初始化的，并且从未初始化的内存加载会产生未定义的值。如果分配的堆栈空间不足，则操作本身是不确定的。函数返回时，会自动释放已分配的内存。
+alloca指令通常用于表示必须具有可用地址的自动变量。当函数返回时（使用ret或resume指令），将回收内存。分配零字节是合法的，但是返回的指针可能不是唯一的。
+没有指定分配内存的顺序（即堆栈增长的方式）。
+
+例子：
+#+BEGIN_SRC
+%ptr = alloca i32                             ; yields i32*:ptr
+%ptr = alloca i32, i32 4                      ; yields i32*:ptr
+%ptr = alloca i32, i32 4, align 1024          ; yields i32*:ptr
+%ptr = alloca i32, align 1024                 ; yields i32*:ptr
+#+END_SRC
+
+*** load
+语法：
+#+BEGIN_SRC
+<result> = load [volatile] <ty>, <ty>* <pointer>[, align <alignment>][, !nontemporal !<nontemp_node>][, !invariant.load !<empty_node>][, !invariant.group !<empty_node>][, !nonnull !<empty_node>][, !dereferenceable !<deref_bytes_node>][, !dereferenceable_or_null !<deref_bytes_node>][, !align !<align_node>][, !noundef !<empty_node>]
+<result> = load atomic [volatile] <ty>, <ty>* <pointer> [syncscope("<target-scope>")] <ordering>, align <alignment> [, !invariant.group !<empty_node>]
+!<nontemp_node> = !{ i32 1 }
+!<empty_node> = !{}
+!<deref_bytes_node> = !{ i64 <dereferenceable_bytes> }
+!<align_node> = !{ i64 <value_alignment> }
+#+END_SRC
+load 指令的参数指定它应该load的地址，指定的类型必须是size已知的first class类型。如果将load标记为volatile，则不允许优化器使用其他volatile操作来修改此load的执行次数或执行顺序。
+
+如果load标记为atomic load，则需要额外的排序和可选的syncscope（“ <target-scope>”）参数。release和acq_rel排序在load指令上无效。当automic load看到多个automic store时，
+它们会产生确定的结果。pointee的类型必须是整数，指针或浮点类型，其位宽度是2的幂次，它大于或等于8且小于或等于target-specific size limit。必须在automic load上显式指定align，
+并且如果未将对齐设置为至少大于pointee类型的字节大小的值，则load具有未定义的行为。!nontemporal对atomic load没有具体含义。
+
+可选的constant align参数指定操作的对齐方式（即内存地址的对齐方式）。值为0或省略的align参数意味着该操作的对齐方式和target的ABI一样。高估alignment会导致不确定的行为。
+低估alignment可能会产生低效的代码。alignment取1始终是安全的。可能的最大对齐方式是1 <<29。
+
+可选的!nontemporal元数据必须引用一个元数据名称<nontemp_node>，该名称与包含一个i32类型的值为1的元数据节点相对应。指令中!nontemporal元数据的存在告诉优化器和代码生成器，此load
+不会在缓存中重用。代码生成器可以选择特殊指令以节省缓存带宽，例如x86上的MOVNT指令。
+
+可选的!invariant.load元数据必须引用与没有条目的元数据节点相对应的单个元数据名称<empty_node>。如果执行了以！invariant.load元数据标记的加载指令，则优化器可能会假定加载所引用的内存位置在程序中所有已知可取消引用的位置上都包含相同的值；否则，行为是不确定的。
+
+可选的！invariant.group元数据必须引用一个元数据名称
+<empty_node>对应于没有条目的元数据节点。请参见invariant.group元数据invariant.group。
+可选的！nonnull元数据必须引用与没有条目的元数据节点相对应的单个元数据名称<empty_node>。指令中！nonnull元数据的存在告诉优化器，已知加载的值永远不会为null。如果在运行时该值为null，则行为是未定义的。这类似于参数和返回值的nonnull属性。此元数据只能应用于指针类型的负载。
+
+可选的！dereferenceable元数据必须引用与具有一个i64条目的元数据节点相对应的单个元数据名称<deref_bytes_node>。请参阅可解除引用的可解除引用的元数据。
+
+可选的！dereferenceable_or_null元数据必须引用与具有一个i64条目的元数据节点相对应的单个元数据名称<deref_bytes_node>。请参见dereferenceable_or_null元数据dereferenceable_or_null。
+
+可选的！align元数据必须引用与具有一个i64条目的元数据节点相对应的单个元数据名称<align_node>。指令中！align元数据的存在告诉优化器，已知加载的值与元数据节点中整数值指定的边界对齐。对齐方式必须是2的幂。这类似于参数和返回值的'align'属性。此元数据只能应用于指针类型的负载。如果返回的值在运行时未正确对齐，则行为未定义。
+
+可选的！noundef元数据必须引用与没有条目的节点相对应的单个元数据名称<empty_node>。指令中！noundef元数据的存在告诉优化器，已知加载的值定义正确。如果该值定义不正确，则行为是不确定的。
 * lazy symbol binding
 Lazy binding is controlled by the -z option to the linker, ld. This option takes keywords as an argument; the keywords include (among others):
 
@@ -2226,8 +2349,5 @@ auto register static extern _Thread_local
 C++ function annotations:https://docs.microsoft.com/en-us/cpp/code-quality/annotating-function-parameters-and-return-values?view=msvc-160
 
 python function annotations:https://www.tutorialspoint.com/function-annotations-in-python
-* poison value
-poison is a special value that represents a violation of an assumption。
-undef of type T is the set consisting of all defined values of T。
 * tail call
 函数在code block的结尾被调用，即为tail call。
